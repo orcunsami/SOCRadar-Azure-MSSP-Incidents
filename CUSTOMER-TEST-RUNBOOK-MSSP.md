@@ -44,40 +44,21 @@ Confirm to customer: "9 alarms seeded across companies 132, 200, 300. Ready for 
 
 ---
 
-## 2. Customer side — deploy via Content Hub or Deploy to Azure (15 min)
-
-### Option A — Content Hub install (preferred for Marketplace path)
-
-1. Microsoft Sentinel → **Content Hub**.
-2. Search for **SOCRadar MSSP** → **Install**.
-3. From the Solution's **Manage** view, click **Configure** on each of the 2 playbook templates:
-
-   **SOCRadar-MSSP-Alarm-Import:**
-   - **Playbook Name**: leave default `SOCRadar-MSSP-Alarm-Import`
-   - **Company Ids**: `132,200,300`
-   - **Company Names**: `Acme,Beta,Gamma`
-   - **Socradar Api Key**: the MSSP-scoped API key
-   - **Workspace Name**: your Microsoft Sentinel workspace name
-   - **Workspace Resource Group**: (optional) leave blank if same RG; set if workspace lives in another RG
-   - **Workspace Location**: e.g. `westeurope` — must match your workspace's region
-
-   **SOCRadar-MSSP-Alarm-Sync:**
-   - **Playbook Name**: leave default `SOCRadar-MSSP-Alarm-Sync`
-   - **Company Ids**: `132,200,300` *(must match Import)*
-   - **Company Names**: `Acme,Beta,Gamma` *(must match Import)*
-   - **Socradar Api Key**: same MSSP-scoped key
-   - **Workspace Name**: same workspace
-
-4. **Review + Create** on each playbook. Wait for `Succeeded` (~3–5 minutes each).
-
-### Option B — Standalone Deploy to Azure button
+## 2. Customer side — deploy via Deploy to Azure button (15 min)
 
 1. Open the GitHub repo README: `https://github.com/<socradar-org>/SOCRadar-Azure-MSSP-Incidents`.
-2. Click **Deploy to Azure** on the **combined** template.
-3. Same parameters as Content Hub (above), but supplied once for both Import + Sync.
-4. Review + Create. Wait for `Succeeded`.
-
-### Both options
+2. Click **Deploy to Azure** on the combined ARM template.
+3. Fill the form with these parameters:
+   - **Resource Group**: a new or existing RG for the integration
+   - **Region** / **Workspace Location**: e.g. `westeurope` — must match your Microsoft Sentinel workspace's region
+   - **Workspace Name**: your existing Microsoft Sentinel workspace name
+   - **Workspace Resource Group**: (optional) leave blank if same RG; set if workspace lives in another RG
+   - **SOCRadar API Key**: the MSSP-scoped API key from the SOCRadar account team
+   - **Company Ids**: `132,200,300`
+   - **Company Names**: `Acme,Beta,Gamma`
+   - **Enable Alarms Table**: ✅ true
+   - **Enable Audit Logging**: ✅ true
+4. **Review + Create**. Wait for `Succeeded` (~1 minute).
 
 The Logic Apps begin polling **3 minutes after deployment** to give role assignments time to propagate. If `CompanyIds` and `CompanyNames` have different counts (e.g. 3 ids, 2 names), the first run **fails fast** with `InvalidInput: CompanyIds count (3) must equal CompanyNames count (2)`.
 
@@ -158,7 +139,7 @@ Mapping reference:
 ## 4. Cleanup (5 min)
 
 **Customer side:**
-1. Microsoft Sentinel → **Content Hub** → SOCRadar MSSP → **Uninstall** (or delete the resource group).
+1. Delete the deployment resource group (this removes all integration resources).
 2. (If standalone deployed) Delete the resource group.
 
 **SOCRadar side:**

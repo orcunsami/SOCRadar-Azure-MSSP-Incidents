@@ -101,12 +101,6 @@ Click the **Deploy to Azure** button on your new repository's README. Verify the
 
 You can cancel without deploying — the goal is to confirm the link resolves to the correct template.
 
-## Step 7 — (Optional) Publish to Azure Marketplace via Content Hub
-
-If you want customers to install from Microsoft Sentinel's **Content Hub** (not just the GitHub button), use the **Content Hub Solution bundle** (`SOCRadar-MSSP-Incidents-ContentHub-v1.0.0.zip`) shipped alongside this standalone bundle. The Content Hub Solution is a separate delivery and follows Microsoft's Solution Submission process — see Microsoft Sentinel partner documentation.
-
-Both bundles share the same source (`azure/mssp-incidents/`), so a fix in the standalone is a fix in the Content Hub Solution (and vice versa) after rebuilding.
-
 ## What is and is NOT in this bundle
 
 **Included:**
