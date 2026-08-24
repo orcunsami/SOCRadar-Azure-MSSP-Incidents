@@ -1,0 +1,25 @@
+id: 5325a3a6-4c7d-5b98-b77a-8d0870a1f5d2
+name: SOCRadar MSSP - Critical Alarms
+description: |
+  'Open HIGH and CRITICAL SOCRadar alarms across every monitored company.'
+description-detailed: |
+  'Filters the MSSP alarm table down to the open HIGH and CRITICAL alarms and keeps company_name on every row so the result can be routed to the right customer.
+  Severity values arrive from SOCRadar in upper case.'
+requiredDataConnectors: []
+tactics:
+  - Impact
+relevantTechniques:
+  - T1486
+severity: High
+entityMappings:
+  - entityType: Malware
+    fieldMappings:
+      - identifier: Name
+        columnName: AlarmMainType
+query: |
+  SOCRadar_MSSP_Alarms_CL
+  | where Severity in ("HIGH", "CRITICAL")
+  | where Status == "OPEN"
+  | project TimeGenerated, company_name, AlarmId, Title, AlarmMainType, AlarmSubType, Severity, Status
+  | order by TimeGenerated desc
+version: 1.0.0

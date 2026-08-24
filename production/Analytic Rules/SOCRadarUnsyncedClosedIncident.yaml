@@ -1,13 +1,10 @@
 id: 8ccaf19c-0b87-4624-8d68-2a4960139c34
-name: SOCRadar MSSP — Unsynced Closed Incident
+name: SOCRadar MSSP - Unsynced Closed Incident
 description: |
-  'Detects Microsoft Sentinel incidents tagged as SOCRadar that were closed more than 30 minutes ago but do not have the Synced tag. This may indicate the SOCRadar-Alarm-Sync playbook has failed to update the SOCRadar platform with the closure status.'
+  'Detects Microsoft Sentinel incidents tagged as SOCRadar that were closed more than 30 minutes ago but do not have the Synced tag. This may indicate the SOCRadar-MSSP-Alarm-Sync playbook has failed to update the SOCRadar platform with the closure status.'
 severity: Low
 status: Available
-requiredDataConnectors:
-  - connectorId: MicrosoftSentinel
-    dataTypes:
-      - SecurityIncident
+requiredDataConnectors: []
 queryFrequency: 1h
 queryPeriod: 1d
 triggerOperator: gt
@@ -23,12 +20,13 @@ query: |
     | where LastModifiedTime < ago(30m)
     | where not(Labels has "Synced")
     | extend AlarmId = extract(@"#(\d+)", 1, Title)
+    | extend company_name = extract(@"^\[MSSP-([^\]]+)\]", 1, Title)
     | extend AccountName = AlarmId
-    | project TimeGenerated, IncidentName, Title, Status, Classification, LastModifiedTime, AlarmId, AccountName
+    | project TimeGenerated, IncidentName, Title, Status, Classification, LastModifiedTime, company_name, AlarmId, AccountName
 entityMappings:
   - entityType: Account
     fieldMappings:
       - identifier: Name
         columnName: AccountName
-version: 1.0.0
+version: 1.0.1
 kind: Scheduled

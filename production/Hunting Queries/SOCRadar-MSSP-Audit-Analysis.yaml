@@ -1,0 +1,23 @@
+id: e1232239-b8be-5299-a2d7-1214bcbdf6be
+name: SOCRadar MSSP - Audit Analysis
+description: |
+  'Import and sync audit events per company, including failures.'
+description-detailed: |
+  'Groups the MSSP audit table by company_name and EventType. AlarmImported is the normal path; CompanyImportFailed means one company's API call failed and the run was marked Failed; CompanySkippedUnmatched means a closed incident carried a company name that is not in the CompanyNames parameter.'
+requiredDataConnectors: []
+tactics:
+  - Discovery
+relevantTechniques:
+  - T1526
+severity: Medium
+entityMappings:
+  - entityType: Account
+    fieldMappings:
+      - identifier: Name
+        columnName: AlarmId
+query: |
+  union isfuzzy=true SOCRadar_MSSP_AuditLog_CL
+  | summarize Events=count(), LastSeen=max(TimeGenerated) by company_name, EventType
+  | extend AlarmId = ""
+  | order by LastSeen desc
+version: 1.0.0

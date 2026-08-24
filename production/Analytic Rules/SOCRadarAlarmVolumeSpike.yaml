@@ -1,13 +1,10 @@
 id: 8cf448f8-52b5-43cf-9e27-f39fd09174c3
-name: SOCRadar MSSP — Alarm Volume Spike
+name: SOCRadar MSSP - Alarm Volume Spike
 description: |
-  'Detects unusual spikes in SOCRadar alarm volume that may indicate an active campaign, coordinated attack, or data breach. Triggers when alarm count in the last hour exceeds the 7-day hourly average by more than 3x.'
+  'Detects unusual spikes in SOCRadar alarm volume that may indicate an active campaign, coordinated attack, or data breach. The baseline and the comparison are both per company_name, so one noisy tenant does not mask or trigger another. Triggers when a company's alarm count in the last hour exceeds its own 7-day hourly average by more than 3x.'
 severity: Medium
 status: Available
-requiredDataConnectors:
-  - connectorId: SOCRadarMSSPAlarms
-    dataTypes:
-      - SOCRadar_MSSP_Alarms_CL
+requiredDataConnectors: []
 queryFrequency: 1h
 queryPeriod: 7d
 triggerOperator: gt
@@ -21,20 +18,21 @@ relevantTechniques:
 query: |
     let baseline = SOCRadar_MSSP_Alarms_CL
     | where TimeGenerated > ago(7d) and TimeGenerated < ago(1h)
-    | summarize AvgHourly = count() / 168.0;
+    | summarize AvgHourly = count() / 168.0 by company_name;
     let recent = SOCRadar_MSSP_Alarms_CL
     | where TimeGenerated > ago(1h)
-    | summarize RecentCount = count() by AlarmMainType;
+    | summarize RecentCount = count() by company_name, AlarmMainType;
     recent
-    | extend BaselineAvg = toscalar(baseline)
-    | where RecentCount > (BaselineAvg * 3) and RecentCount > 5
-    | extend SpikeRatio = round(RecentCount / BaselineAvg, 2)
+    | join kind=inner (baseline) on company_name
+    | where RecentCount > (AvgHourly * 3) and RecentCount > 5
+    | extend SpikeRatio = round(RecentCount / AvgHourly, 2)
     | extend timestamp = now()
-    | extend AccountName = AlarmMainType
+    | extend AccountName = strcat(company_name, ": ", AlarmMainType)
+    | project timestamp, company_name, AlarmMainType, RecentCount, AvgHourly, SpikeRatio, AccountName
 entityMappings:
   - entityType: Malware
     fieldMappings:
       - identifier: Name
         columnName: AccountName
-version: 1.0.0
+version: 1.0.1
 kind: Scheduled

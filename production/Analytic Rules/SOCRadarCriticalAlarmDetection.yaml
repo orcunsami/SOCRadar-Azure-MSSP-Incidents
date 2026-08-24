@@ -1,30 +1,27 @@
 id: b77d2b56-8fc0-4659-91c9-b7aaf7ea3b4a
-name: SOCRadar MSSP — High or Critical Severity Alarm
+name: SOCRadar MSSP - High or Critical Severity Alarm
 description: |
-  'Detects SOCRadar alarms with High or Critical severity levels that require immediate attention. These alarms typically indicate active threats such as credential exposure, ransomware mentions, or targeted attacks against the organization.'
+  'Detects SOCRadar alarms with High or Critical severity levels that require immediate attention. These alarms typically indicate active threats such as credential exposure, ransomware mentions, or targeted attacks against one of the monitored companies. Results carry company_name so an MSSP analyst can route the alert.'
 severity: High
 status: Available
-requiredDataConnectors:
-  - connectorId: SOCRadarMSSPAlarms
-    dataTypes:
-      - SOCRadar_MSSP_Alarms_CL
+requiredDataConnectors: []
 queryFrequency: 15m
 queryPeriod: 15m
 triggerOperator: gt
 triggerThreshold: 0
 tactics:
+  - Reconnaissance
   - InitialAccess
-  - CredentialAccess
 relevantTechniques:
   - T1589
   - T1078
 query: |
     SOCRadar_MSSP_Alarms_CL
-    | where Severity in ("High", "Critical")
+    | where Severity in ("HIGH", "CRITICAL")
     | where Status == "OPEN"
-    | extend AlarmUrl = strcat("https://platform.socradar.com/company/", CompanyId, "/alarms/", AlarmId)
+    | extend AlarmUrl = strcat("https://platform.socradar.com/company/", CompanyId, "/alarm/", AlarmId)
     | extend AccountName = tostring(AlarmId)
-    | project TimeGenerated, AlarmId, Title, AlarmMainType, AlarmSubType, Severity, Status, AlarmUrl, AccountName
+    | project TimeGenerated, company_name, CompanyId, AlarmId, Title, AlarmMainType, AlarmSubType, Severity, Status, AlarmUrl, AccountName
 entityMappings:
   - entityType: Malware
     fieldMappings:
@@ -36,5 +33,5 @@ entityMappings:
     fieldMappings:
       - identifier: Url
         columnName: AlarmUrl
-version: 1.0.0
+version: 1.0.1
 kind: Scheduled

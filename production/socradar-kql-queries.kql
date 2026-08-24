@@ -1,5 +1,5 @@
 // ============================================
-// SOCRadar MSSP — Microsoft Sentinel KQL Queries
+// SOCRadar MSSP - Microsoft Sentinel KQL Queries
 // ============================================
 
 // -----------------------------------------
@@ -222,13 +222,13 @@ SOCRadar_MSSP_Alarms_CL
 // MSSP-specific queries
 // =============================================================
 
-// Company Breakdown — alarm count by company for the last 24 hours
+// Company Breakdown - alarm count by company for the last 24 hours
 SOCRadar_MSSP_Alarms_CL
 | where TimeGenerated > ago(24h)
 | summarize AlarmCount = count() by company_name, AlarmMainType
 | order by AlarmCount desc
 
-// Per-company audit health — successful runs vs failures last 24h
+// Per-company audit health - successful runs vs failures last 24h
 SOCRadar_MSSP_AuditLog_CL
 | where TimeGenerated > ago(24h)
 | summarize SuccessCount = countif(Severity == "INFO"), ErrorCount = countif(Severity == "ERROR") by company_name

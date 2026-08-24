@@ -10,21 +10,21 @@ For **single-customer** deployments, use the [`SOCRadar-Azure-Incidents`](https:
 
 1. Click **Deploy to Azure** above.
 2. Fill the form:
-   - `WorkspaceName` — your existing Microsoft Sentinel workspace
-   - `CompanyIds` — comma-separated SOCRadar Company IDs (e.g. `132,200,300`)
-   - `CompanyNames` — same length CSV with human-readable names (e.g. `Acme,Beta,Gamma`)
-   - `SOCRadarAPIKey` — **MSSP-scoped** SOCRadar API key (one key for all Company IDs; SOCRadar's account team configures this)
+   - `WorkspaceName` - your existing Microsoft Sentinel workspace
+   - `CompanyIds` - comma-separated SOCRadar Company IDs (e.g. `132,200,300`)
+   - `CompanyNames` - same length CSV with human-readable names (e.g. `Acme,Beta,Gamma`)
+   - `SOCRadarAPIKey` - **MSSP-scoped** SOCRadar API key (one key for all Company IDs; SOCRadar's account team configures this)
 3. Review + Create. Logic Apps begin polling 3 minutes after deployment.
 
 ## Capabilities
 
-- **Multi-company alarm import** — one Logic App polls SOCRadar per company per cycle, configurable via `CompanyIds` + `CompanyNames` CSV parameters.
-- **Bidirectional sync** — closed Microsoft Sentinel incidents flow back to the matching SOCRadar account (`TruePositive` → Resolved, `FalsePositive` → False Positive, `BenignPositive` → Mitigated).
-- **Per-company tagging** — incident title prefixed `[<CompanyName>] `; label `Company:<CompanyName>` added; composite `(company_id, alarm_id)` deduplication.
-- **Per-company error isolation** — one company's API failure logs to audit but does not block other companies.
-- **Microsoft Sentinel-native analytics** — workbook with Company Breakdown tile + CompanyName dropdown, 5 hunting queries, 3 analytic rules (all group by company).
-- **DCR-based ingestion** — custom Log Analytics tables (`SOCRadar_MSSP_Alarms_CL` + `SOCRadar_MSSP_AuditLog_CL`) with `company_name` column, written via Data Collection Rule / Logs Ingestion API.
-- **Managed Identity auth** — no App Registration, no Microsoft Graph permissions, no federated identity credentials.
+- **Multi-company alarm import** - one Logic App polls SOCRadar per company per cycle, configurable via `CompanyIds` + `CompanyNames` CSV parameters.
+- **Bidirectional sync** - closed Microsoft Sentinel incidents flow back to the matching SOCRadar account (`TruePositive` -> Resolved, `FalsePositive` -> False Positive, `BenignPositive` -> Mitigated).
+- **Per-company tagging** - incident title prefixed `[MSSP-<CompanyName>] `; label `MSSP-<CompanyName>` added; deduplication key `(CompanyName, alarm_id)`, parsed back out of the incident title.
+- **Per-company error isolation** - one company's API failure logs to audit but does not block other companies.
+- **Microsoft Sentinel-native analytics** - workbook with Alarms by Company tiles, 5 hunting queries and 3 analytic rules, all keyed on `company_name`.
+- **DCR-based ingestion** - custom Log Analytics tables (`SOCRadar_MSSP_Alarms_CL` + `SOCRadar_MSSP_AuditLog_CL`) with `company_name` column, written via Data Collection Rule / Logs Ingestion API.
+- **Managed Identity auth** - no App Registration, no Microsoft Graph permissions, no federated identity credentials.
 
 ## Required permissions
 
@@ -40,9 +40,9 @@ The Logic Apps' Managed Identity gets **Microsoft Sentinel Responder** on the wo
 
 ## Documentation
 
-- [`production/README.md`](production/README.md) — full parameter reference, architecture diagrams, troubleshooting
-- [`CHANGELOG.md`](CHANGELOG.md) — version history
-- [`CUSTOMER-TEST-RUNBOOK-MSSP.md`](CUSTOMER-TEST-RUNBOOK-MSSP.md) — 45-minute acceptance test runbook (3 companies × 3 alarms)
+- [`production/README.md`](production/README.md) - full parameter reference, architecture diagrams, troubleshooting
+- [`CHANGELOG.md`](CHANGELOG.md) - version history
+- [`CUSTOMER-TEST-RUNBOOK-MSSP.md`](CUSTOMER-TEST-RUNBOOK-MSSP.md) - 45-minute acceptance test runbook (3 companies x 3 alarms)
 
 ## Support
 

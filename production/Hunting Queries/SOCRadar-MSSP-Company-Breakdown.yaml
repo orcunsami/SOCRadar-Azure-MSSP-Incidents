@@ -1,0 +1,24 @@
+id: a8c6a77e-d1f4-59a9-9408-689412d362a9
+name: SOCRadar MSSP - Company Breakdown
+description: |
+  'Alarm volume and severity mix per monitored SOCRadar company.'
+description-detailed: |
+  'Breaks the imported SOCRadar alarms down by company_name so an MSSP analyst can see which tenant is generating volume and how severe it is.
+  Use this as the first stop when triaging across customers.'
+requiredDataConnectors: []
+tactics:
+  - Discovery
+relevantTechniques:
+  - T1526
+severity: Medium
+entityMappings:
+  - entityType: Malware
+    fieldMappings:
+      - identifier: Name
+        columnName: AlarmMainType
+query: |
+  SOCRadar_MSSP_Alarms_CL
+  | summarize Alarms=count(), Critical=countif(Severity == "CRITICAL"), High=countif(Severity == "HIGH") by company_name
+  | extend AlarmMainType = "SOCRadar MSSP"
+  | order by Alarms desc
+version: 1.0.0
