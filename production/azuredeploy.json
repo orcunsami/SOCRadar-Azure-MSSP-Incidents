@@ -133,6 +133,13 @@
       "metadata": {
         "description": "Push the Microsoft Sentinel incident severity back to SOCRadar when an incident is closed. Off by default: Microsoft Sentinel has no Critical severity, so a CRITICAL alarm imports as High and writing that back would silently downgrade the alarm on SOCRadar."
       }
+    },
+    "DeployNewWorkspace": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Create a new Log Analytics workspace named WorkspaceName. Leave false when the workspace already exists. The workspace resource declares no workspace-level settings, so even a mistaken true cannot rewrite an existing workspace's pricing tier, retention or daily cap: a template only overwrites the fields it states, and this one states none. A new workspace is created with the subscription default tier. Only honoured when WorkspaceResourceGroup is the deployment resource group, because a workspace cannot be created in another resource group from here."
+      }
     }
   },
   "variables": {
@@ -151,6 +158,7 @@
     "SentinelResponderRoleId": "3e150937-b8fe-4cfb-8069-0eaf05ecd056",
     "sentinelRoleDefinitionId": "[if(equals(parameters('SentinelRoleLevel'), 'Responder'), variables('SentinelResponderRoleId'), variables('SentinelContributorRoleId'))]",
     "isExternalWorkspace": "[not(equals(parameters('WorkspaceResourceGroup'), resourceGroup().name))]",
+    "deployWorkspace": "[and(parameters('DeployNewWorkspace'), not(variables('isExternalWorkspace')))]",
     "LogAnalyticsReaderRoleId": "73c42c96-874c-492b-b04d-ab87d138a893",
     "MonitoringMetricsPublisherRoleId": "3913510d-42f4-4e42-8a64-420c390055eb",
     "workspaceResourceId": "[resourceId(parameters('WorkspaceResourceGroup'), 'Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName'))]",
@@ -161,16 +169,12 @@
   },
   "resources": [
     {
-      "condition": "[not(variables('isExternalWorkspace'))]",
+      "condition": "[variables('deployWorkspace')]",
       "type": "Microsoft.OperationalInsights/workspaces",
       "apiVersion": "2023-09-01",
       "name": "[parameters('WorkspaceName')]",
       "location": "[parameters('WorkspaceLocation')]",
-      "properties": {
-        "sku": {
-          "name": "PerGB2018"
-        }
-      }
+      "properties": {}
     },
     {
       "condition": "[not(variables('isExternalWorkspace'))]",

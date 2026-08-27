@@ -80,6 +80,7 @@ If `CompanyIds` and `CompanyNames` have different lengths, the first Logic App r
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `WorkspaceResourceGroup` | deployment RG | Set if workspace is in a different RG |
+| `DeployNewWorkspace` | `false` | Create `WorkspaceName` instead of using an existing one. The workspace resource states no workspace-level settings, so leaving this `false` against an existing workspace never touches its pricing tier, retention or daily cap -- and setting it `true` by mistake is harmless for the same reason. Ignored when `WorkspaceResourceGroup` is not the deployment RG. |
 | `SentinelRoleLevel` | `Responder` | `Responder` (least-privilege) or `Contributor` |
 | `PollingIntervalMinutes` | `5` | How often to poll SOCRadar (1-60) |
 | `InitialLookbackMinutes` | `600` | First-run lookback window (10 hours) |
@@ -89,6 +90,25 @@ If `CompanyIds` and `CompanyNames` have different lengths, the first Logic App r
 | `EnableWorkbook` | `true` | Deploys the SOCRadar MSSP Dashboard workbook |
 | `SyncSeverity` | `false` | Push the Microsoft Sentinel incident severity back to SOCRadar on close. Off by default: Microsoft Sentinel has no Critical severity, so a CRITICAL alarm imports as High and writing that back would downgrade the alarm on SOCRadar |
 | `TableRetentionDays` | `365` | Retention for custom tables (30-730) |
+
+## Existing installations
+
+Deployments made before `DeployNewWorkspace` existed stated a pricing tier on the workspace
+resource, and a template overwrites every field it states. If the target workspace was on a
+**commitment tier**, that deployment reset it to `PerGB2018` (pay-as-you-go).
+
+Check the current tier:
+
+```bash
+az monitor log-analytics workspace show -g <resource-group> -n <workspace> \
+  --query "{sku:sku.name, lastSkuUpdate:sku.lastSkuUpdate}" -o json
+```
+
+If `lastSkuUpdate` lines up with when you first deployed this integration and the tier isn't
+the one you picked, reset your commitment tier from **Log Analytics workspaces > Usage and
+estimated costs > Pricing tier**. The current template states no workspace-level settings at
+all, so redeploying or upgrading an existing install -- even with `DeployNewWorkspace=true` set
+by mistake -- cannot change its pricing tier, retention or daily cap.
 
 ## What Gets Deployed
 
