@@ -8,6 +8,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+The only tag in this repository is `v1.0.0` (annotated, 15 May 2026, commit
+`6a13b6a`) and it has no GitHub release. The 1.1.0 heading below was written on
+21 Aug 2026 but was never tagged, and two commits landed after it without a
+changelog entry -- they are recorded here.
+
+### Fixed
+
+- **A wrong workspace name no longer half-installs.** The deployment resolves the
+  workspace in a `precheck-workspace-exists` nested deployment that every other
+  resource waits on. ARM counts a resource whose `condition` is false as a
+  satisfied dependency, so depending on the Workspace resource stopped nothing:
+  with `DeployNewWorkspace` at its default the Microsoft Sentinel API connection,
+  the Data Collection Endpoint, the workbook and both Logic Apps were created and
+  only then did the deployment fail with `ResourceNotFound`. The Import Logic App
+  is enabled and billable in that state. Measured on a fresh resource group: `0`
+  resources afterwards. (EXP-AZURE-0198)
+- **Cross-RG onto a workspace without Microsoft Sentinel is rejected.** This
+  template creates the Microsoft Sentinel solution and its onboarding state only
+  in the deployment resource group, so a cross-RG deployment used to go green and
+  import nothing. A `precheck-external-workspace` step now reads the external
+  workspace's onboarding state first.
+- **Cross-RG deployment never completed.** Pointing the template at a workspace
+  in another resource group failed every time, and had done so since cross-RG
+  support was written. The custom-table resources are conditioned out in that
+  mode but the parameters feeding the Logic Apps still called `reference()` on
+  them, and ARM evaluates a nested deployment's parameters whether the resource
+  behind them exists or not. The `EnableAlarmsTable` and `EnableAuditLogging`
+  flags handed to the Logic Apps are now forced to `false()` when the workspace
+  is external (three call sites), and each remaining `reference()` is wrapped in
+  its own resource's condition with an `'N/A'` fallback. The workbook was
+  already conditioned out in that mode. Custom tables and the workbook are therefore not
+  available cross-RG; incident import and sync are.
+- **Audit logging without the alarms table could not deploy.** The Data
+  Collection Endpoint was conditioned on `EnableAlarmsTable` alone, so
+  `EnableAlarmsTable=false EnableAuditLogging=true` produced an audit Data
+  Collection Rule pointing at an endpoint that was never created. The condition
+  now covers either table. Measured on that combination: `Succeeded`, one
+  endpoint, one rule.
+- **The Deploy to Azure button in `production/README.md` was a 404.** It pointed
+  at `master/azuredeploy.json`; the template lives at
+  `master/production/azuredeploy.json`. The root README had the right path, which
+  is why it went unnoticed.
+- **CI has been failing since 27 Aug 2026.** The commit that added the workspace
+  safety test also added em-dashes to it, and this repository's own ASCII gate
+  rejects them. Replaced with `--`. A gate nobody reads is not a gate.
+- **The workspace safety test aimed at a closed subscription.** Its default was a
+  hardcoded subscription id belonging to an account that has since been closed,
+  so the default silently targeted whatever that id points at today. It now uses
+  `TEST_SUBSCRIPTION` or the logged-in context and refuses to run without one.
+- **A redeploy cannot rewrite an existing workspace.** `DeployNewWorkspace`
+  (default `false`) and a Workspace resource that declares no properties, from the
+  27 Aug commits. (EXP-AZURE-0160)
+
+### Added
+
+- `production/scripts/test_deploy_paths.sh` -- seven live deployment paths, 19
+  assertions, including the guard's success branch, which the greenfield path
+  skips: a wrong api-version inside the guard would otherwise leave every test
+  green and fail only at a customer. The cross-RG path onboards its own
+  workspace, so it does not inherit one an earlier path installed into.
+- `tools/mutate.py` -- breaks each invariant on a copy of the tree and requires
+  the drift gate to catch it. Wired into CI. 14 mutations, 0 blind. A mutation
+  whose anchor no longer matches counts as a failure, not a skip.
+- Static gates in `tools/check_template_drift.py`: both prechecks exist with the
+  right condition and `scope: inner`, their outputs call `reference()` rather
+  than `resourceId()` string arithmetic, every resource waits on them, the
+  Workspace declares no properties, and every `raw.githubusercontent` link in a
+  markdown file resolves to a path that exists in the repository.
+
+### Changed
+
+- `check_self_contained` no longer reads an inner-scope nested template's
+  parameters as the parent's. It reported five false failures on
+  `deploy-workspace-roles` when the prechecks were added -- scope `outer` is
+  evaluated in the parent and must not be split, scope `inner` must.
+
 ## [1.1.0] - 2026-08-21
 
 Correctness release. Ports the alarm-import fixes made in the single-customer

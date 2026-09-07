@@ -177,13 +177,86 @@
       "properties": {}
     },
     {
+      "comments": "Resolves the existing workspace before any resource is created. A condition:false resource counts as a satisfied dependency in ARM, so depending on the Workspace resource itself does not stop the deployment when WorkspaceName does not exist and DeployNewWorkspace is false -- it would create the API connection, both Logic Apps, the workbook and the data collection endpoint and only then fail. This checks that the workspace EXISTS and nothing else. It does not check the deploying principal's write permission, and it cannot check whether the workspace already carries role assignments from an earlier install, which fail later with RoleAssignmentUpdateNotPermitted after resources have been created -- ARM can assert that a resource exists, not that it is absent.",
+      "condition": "[not(variables('deployWorkspace'))]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2021-04-01",
+      "name": "precheck-workspace-exists",
+      "properties": {
+        "mode": "Incremental",
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "parameters": {
+          "WorkspaceResourceId": {
+            "value": "[variables('workspaceResourceId')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {
+            "WorkspaceResourceId": {
+              "type": "string"
+            }
+          },
+          "resources": [],
+          "outputs": {
+            "workspaceId": {
+              "type": "string",
+              "value": "[reference(parameters('WorkspaceResourceId'), '2023-09-01', 'Full').properties.customerId]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "comments": "Cross-RG only. Asserts that Microsoft Sentinel is onboarded on the external workspace. This template only creates the SecurityInsights solution and the onboarding state in its own resource group, so a cross-RG deployment onto a bare Log Analytics workspace deploys green and then imports nothing.",
+      "condition": "[variables('isExternalWorkspace')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2021-04-01",
+      "name": "precheck-external-workspace",
+      "properties": {
+        "mode": "Incremental",
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "parameters": {
+          "WorkspaceResourceId": {
+            "value": "[variables('workspaceResourceId')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "parameters": {
+            "WorkspaceResourceId": {
+              "type": "string"
+            }
+          },
+          "resources": [],
+          "outputs": {
+            "sentinelOnboarded": {
+              "type": "string",
+              "value": "[reference(concat(parameters('WorkspaceResourceId'), '/providers/Microsoft.SecurityInsights/onboardingStates/default'), '2023-02-01', 'Full').id]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-workspace-exists')]"
+      ]
+    },
+    {
       "condition": "[not(variables('isExternalWorkspace'))]",
       "type": "Microsoft.OperationsManagement/solutions",
       "apiVersion": "2015-11-01-preview",
       "name": "[concat('SecurityInsights(', parameters('WorkspaceName'), ')')]",
       "location": "[parameters('WorkspaceLocation')]",
       "dependsOn": [
-        "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName'))]"
+        "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName'))]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-workspace-exists')]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-external-workspace')]"
       ],
       "plan": {
         "name": "[concat('SecurityInsights(', parameters('WorkspaceName'), ')')]",
@@ -201,7 +274,9 @@
       "apiVersion": "2024-03-01",
       "name": "[concat(parameters('WorkspaceName'), '/Microsoft.SecurityInsights/default')]",
       "dependsOn": [
-        "[resourceId('Microsoft.OperationsManagement/solutions', concat('SecurityInsights(', parameters('WorkspaceName'), ')'))]"
+        "[resourceId('Microsoft.OperationsManagement/solutions', concat('SecurityInsights(', parameters('WorkspaceName'), ')'))]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-workspace-exists')]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-external-workspace')]"
       ],
       "properties": {}
     },
@@ -212,7 +287,9 @@
       "name": "[concat(parameters('WorkspaceName'), '/', variables('AuditTableName'))]",
       "dependsOn": [
         "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName'))]",
-        "[resourceId('Microsoft.OperationsManagement/solutions', concat('SecurityInsights(', parameters('WorkspaceName'), ')'))]"
+        "[resourceId('Microsoft.OperationsManagement/solutions', concat('SecurityInsights(', parameters('WorkspaceName'), ')'))]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-workspace-exists')]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-external-workspace')]"
       ],
       "properties": {
         "schema": {
@@ -281,7 +358,9 @@
       "location": "[parameters('WorkspaceLocation')]",
       "dependsOn": [
         "[resourceId('Microsoft.OperationalInsights/workspaces/tables', parameters('WorkspaceName'), variables('AuditTableName'))]",
-        "[resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('DceName'))]"
+        "[resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('DceName'))]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-workspace-exists')]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-external-workspace')]"
       ],
       "kind": "Direct",
       "properties": {
@@ -356,7 +435,7 @@
       }
     },
     {
-      "condition": "[and(parameters('EnableAlarmsTable'), not(variables('isExternalWorkspace')))]",
+      "condition": "[and(or(parameters('EnableAuditLogging'), parameters('EnableAlarmsTable')), not(variables('isExternalWorkspace')))]",
       "type": "Microsoft.Insights/dataCollectionEndpoints",
       "apiVersion": "2023-03-11",
       "name": "[variables('DceName')]",
@@ -366,7 +445,11 @@
         "networkAcls": {
           "publicNetworkAccess": "Enabled"
         }
-      }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-workspace-exists')]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-external-workspace')]"
+      ]
     },
     {
       "condition": "[and(parameters('EnableAlarmsTable'), not(variables('isExternalWorkspace')))]",
@@ -375,7 +458,9 @@
       "name": "[concat(parameters('WorkspaceName'), '/', variables('AlarmsTableName'))]",
       "dependsOn": [
         "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName'))]",
-        "[resourceId('Microsoft.OperationsManagement/solutions', concat('SecurityInsights(', parameters('WorkspaceName'), ')'))]"
+        "[resourceId('Microsoft.OperationsManagement/solutions', concat('SecurityInsights(', parameters('WorkspaceName'), ')'))]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-workspace-exists')]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-external-workspace')]"
       ],
       "properties": {
         "schema": {
@@ -454,7 +539,9 @@
       "location": "[parameters('WorkspaceLocation')]",
       "dependsOn": [
         "[resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('DceName'))]",
-        "[resourceId('Microsoft.OperationalInsights/workspaces/tables', parameters('WorkspaceName'), variables('AlarmsTableName'))]"
+        "[resourceId('Microsoft.OperationalInsights/workspaces/tables', parameters('WorkspaceName'), variables('AlarmsTableName'))]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-workspace-exists')]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-external-workspace')]"
       ],
       "properties": {
         "description": "DCR for SOCRadar alarms ingestion",
@@ -548,7 +635,11 @@
         "version": "1.0",
         "sourceId": "[variables('workspaceResourceId')]",
         "category": "sentinel"
-      }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-workspace-exists')]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-external-workspace')]"
+      ]
     },
     {
       "type": "Microsoft.Web/connections",
@@ -562,7 +653,11 @@
           "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'azuresentinel')]"
         },
         "parameterValueType": "Alternative"
-      }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-workspace-exists')]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-external-workspace')]"
+      ]
     },
     {
       "type": "Microsoft.Logic/workflows",
@@ -576,7 +671,9 @@
         "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName'))]",
         "[resourceId('Microsoft.Web/connections', variables('SentinelConnectionName'))]",
         "[resourceId('Microsoft.Insights/dataCollectionRules', variables('AuditDcrName'))]",
-        "[resourceId('Microsoft.Insights/dataCollectionRules', variables('AlarmsDcrName'))]"
+        "[resourceId('Microsoft.Insights/dataCollectionRules', variables('AlarmsDcrName'))]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-workspace-exists')]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-external-workspace')]"
       ],
       "properties": {
         "state": "Enabled",
@@ -1636,25 +1733,25 @@
             "value": "[parameters('ImportAllStatuses')]"
           },
           "EnableAuditLogging": {
-            "value": "[parameters('EnableAuditLogging')]"
+            "value": "[if(variables('isExternalWorkspace'), false(), parameters('EnableAuditLogging'))]"
           },
           "AuditDcrEndpoint": {
-            "value": "[reference(variables('dceResourceId'), '2024-03-11').logsIngestion.endpoint]"
+            "value": "[if(and(parameters('EnableAuditLogging'), not(variables('isExternalWorkspace'))), reference(variables('dceResourceId'), '2024-03-11').logsIngestion.endpoint, 'N/A')]"
           },
           "AuditDcrImmutableId": {
-            "value": "[reference(variables('auditDcrResourceId'), '2024-03-11').immutableId]"
+            "value": "[if(and(parameters('EnableAuditLogging'), not(variables('isExternalWorkspace'))), reference(variables('auditDcrResourceId'), '2024-03-11').immutableId, 'N/A')]"
           },
           "AuditStreamName": {
             "value": "[variables('AuditStreamName')]"
           },
           "EnableAlarmsTable": {
-            "value": "[parameters('EnableAlarmsTable')]"
+            "value": "[if(variables('isExternalWorkspace'), false(), parameters('EnableAlarmsTable'))]"
           },
           "DceEndpoint": {
-            "value": "[reference(variables('dceResourceId'), '2024-03-11').logsIngestion.endpoint]"
+            "value": "[if(and(parameters('EnableAlarmsTable'), not(variables('isExternalWorkspace'))), reference(variables('dceResourceId'), '2024-03-11').logsIngestion.endpoint, 'N/A')]"
           },
           "AlarmsDcrImmutableId": {
-            "value": "[reference(variables('alarmsDcrResourceId'), '2024-03-11').immutableId]"
+            "value": "[if(and(parameters('EnableAlarmsTable'), not(variables('isExternalWorkspace'))), reference(variables('alarmsDcrResourceId'), '2024-03-11').immutableId, 'N/A')]"
           },
           "AlarmsStreamName": {
             "value": "[variables('AlarmsStreamName')]"
@@ -1687,7 +1784,9 @@
         "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('WorkspaceName'))]",
         "[resourceId('Microsoft.Web/connections', variables('SentinelConnectionName'))]",
         "[resourceId('Microsoft.Insights/dataCollectionEndpoints', variables('DceName'))]",
-        "[resourceId('Microsoft.Insights/dataCollectionRules', variables('AuditDcrName'))]"
+        "[resourceId('Microsoft.Insights/dataCollectionRules', variables('AuditDcrName'))]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-workspace-exists')]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-external-workspace')]"
       ],
       "properties": {
         "state": "Enabled",
@@ -2317,13 +2416,13 @@
             "value": "[parameters('PollingIntervalMinutes')]"
           },
           "EnableAuditLogging": {
-            "value": "[parameters('EnableAuditLogging')]"
+            "value": "[if(variables('isExternalWorkspace'), false(), parameters('EnableAuditLogging'))]"
           },
           "AuditDcrEndpoint": {
-            "value": "[reference(variables('dceResourceId'), '2024-03-11').logsIngestion.endpoint]"
+            "value": "[if(and(parameters('EnableAuditLogging'), not(variables('isExternalWorkspace'))), reference(variables('dceResourceId'), '2024-03-11').logsIngestion.endpoint, 'N/A')]"
           },
           "AuditDcrImmutableId": {
-            "value": "[reference(variables('auditDcrResourceId'), '2024-03-11').immutableId]"
+            "value": "[if(and(parameters('EnableAuditLogging'), not(variables('isExternalWorkspace'))), reference(variables('auditDcrResourceId'), '2024-03-11').immutableId, 'N/A')]"
           },
           "AuditStreamName": {
             "value": "[variables('AuditStreamName')]"
@@ -2348,7 +2447,9 @@
       "name": "[guid(variables('workspaceResourceId'), variables('ImportPlaybookName'), variables('sentinelRoleDefinitionId'))]",
       "scope": "[variables('workspaceResourceId')]",
       "dependsOn": [
-        "[resourceId('Microsoft.Logic/workflows', variables('ImportPlaybookName'))]"
+        "[resourceId('Microsoft.Logic/workflows', variables('ImportPlaybookName'))]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-workspace-exists')]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-external-workspace')]"
       ],
       "properties": {
         "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('sentinelRoleDefinitionId'))]",
@@ -2363,7 +2464,9 @@
       "name": "[guid(variables('workspaceResourceId'), variables('ImportPlaybookName'), variables('LogAnalyticsReaderRoleId'))]",
       "scope": "[variables('workspaceResourceId')]",
       "dependsOn": [
-        "[resourceId('Microsoft.Logic/workflows', variables('ImportPlaybookName'))]"
+        "[resourceId('Microsoft.Logic/workflows', variables('ImportPlaybookName'))]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-workspace-exists')]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-external-workspace')]"
       ],
       "properties": {
         "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('LogAnalyticsReaderRoleId'))]",
@@ -2379,7 +2482,9 @@
       "scope": "[resourceId('Microsoft.Insights/dataCollectionRules', variables('AuditDcrName'))]",
       "dependsOn": [
         "[resourceId('Microsoft.Logic/workflows', variables('ImportPlaybookName'))]",
-        "[resourceId('Microsoft.Insights/dataCollectionRules', variables('AuditDcrName'))]"
+        "[resourceId('Microsoft.Insights/dataCollectionRules', variables('AuditDcrName'))]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-workspace-exists')]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-external-workspace')]"
       ],
       "properties": {
         "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('MonitoringMetricsPublisherRoleId'))]",
@@ -2395,7 +2500,9 @@
       "scope": "[resourceId('Microsoft.Insights/dataCollectionRules', variables('AuditDcrName'))]",
       "dependsOn": [
         "[resourceId('Microsoft.Logic/workflows', variables('SyncPlaybookName'))]",
-        "[resourceId('Microsoft.Insights/dataCollectionRules', variables('AuditDcrName'))]"
+        "[resourceId('Microsoft.Insights/dataCollectionRules', variables('AuditDcrName'))]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-workspace-exists')]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-external-workspace')]"
       ],
       "properties": {
         "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('MonitoringMetricsPublisherRoleId'))]",
@@ -2411,7 +2518,9 @@
       "scope": "[resourceId('Microsoft.Insights/dataCollectionRules', variables('AlarmsDcrName'))]",
       "dependsOn": [
         "[resourceId('Microsoft.Logic/workflows', variables('ImportPlaybookName'))]",
-        "[resourceId('Microsoft.Insights/dataCollectionRules', variables('AlarmsDcrName'))]"
+        "[resourceId('Microsoft.Insights/dataCollectionRules', variables('AlarmsDcrName'))]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-workspace-exists')]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-external-workspace')]"
       ],
       "properties": {
         "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('MonitoringMetricsPublisherRoleId'))]",
@@ -2426,7 +2535,9 @@
       "name": "[guid(variables('workspaceResourceId'), variables('SyncPlaybookName'), variables('sentinelRoleDefinitionId'))]",
       "scope": "[variables('workspaceResourceId')]",
       "dependsOn": [
-        "[resourceId('Microsoft.Logic/workflows', variables('SyncPlaybookName'))]"
+        "[resourceId('Microsoft.Logic/workflows', variables('SyncPlaybookName'))]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-workspace-exists')]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-external-workspace')]"
       ],
       "properties": {
         "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('sentinelRoleDefinitionId'))]",
@@ -2442,7 +2553,9 @@
       "resourceGroup": "[parameters('WorkspaceResourceGroup')]",
       "dependsOn": [
         "[resourceId('Microsoft.Logic/workflows', variables('ImportPlaybookName'))]",
-        "[resourceId('Microsoft.Logic/workflows', variables('SyncPlaybookName'))]"
+        "[resourceId('Microsoft.Logic/workflows', variables('SyncPlaybookName'))]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-workspace-exists')]",
+        "[resourceId('Microsoft.Resources/deployments', 'precheck-external-workspace')]"
       ],
       "properties": {
         "mode": "Incremental",

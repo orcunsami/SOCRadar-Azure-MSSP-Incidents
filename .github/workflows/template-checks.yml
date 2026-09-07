@@ -58,6 +58,11 @@ jobs:
       - name: Templates hold the invariants a release depends on
         run: python3 tools/check_template_drift.py
 
+      - name: The drift gate actually fails when an invariant is broken
+        # A gate that has never failed is not evidence. This breaks each invariant
+        # on a copy of the tree and requires the gate to catch every one.
+        run: python3 tools/mutate.py
+
       - name: Rules and hunting queries match the shipped schema and ATT&CK mapping
         run: |
           pip install --quiet pyyaml

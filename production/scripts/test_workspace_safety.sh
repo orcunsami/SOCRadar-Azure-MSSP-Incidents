@@ -13,7 +13,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TEMPLATE="$REPO_ROOT/azuredeploy.json"
 
-SUBSCRIPTION="${TEST_SUBSCRIPTION:-b622bfd9-6b2b-45b3-b7d2-7b5d3114b96b}"
+# No hardcoded subscription default. b622bfd9 was here: an account that has since
+# been closed, so the default silently aimed this test at whatever that id points
+# at today. Use TEST_SUBSCRIPTION, or fall back to the logged-in context.
+SUBSCRIPTION="${TEST_SUBSCRIPTION:-$(az account show --query id -o tsv 2>/dev/null || true)}"
+if [ -z "$SUBSCRIPTION" ]; then
+    echo "ERROR: no subscription. Run 'az login' or set TEST_SUBSCRIPTION." >&2
+    exit 2
+fi
+echo "[0/6] Target subscription: $SUBSCRIPTION"
 LOCATION="${TEST_LOCATION:-westeurope}"
 RG="rg-workspace-safety-canary-mssp"
 WS="workspace-safety-canary-mssp"
@@ -49,7 +57,7 @@ print(f"  extracted condition: {ws.get('condition')}")
 print(f"  extracted properties: {ws.get('properties')}")
 PY
 
-echo "[2/6] Static check: properties must be empty (this is the actual safety guarantee — an"
+echo "[2/6] Static check: properties must be empty (this is the actual safety guarantee -- an"
 echo "      empty block can't overwrite anything regardless of the SKU/retention the real"
 echo "      customer workspace already has, and regardless of whether the condition above is"
 echo "      ever wrong). A live mutation test alone would miss this: it can only prove drift"
@@ -61,7 +69,7 @@ props = d['resources'][0].get('properties', {})
 print('true' if props == {} else 'false')
 ")
 if [[ "$STATIC_OK" != "true" ]]; then
-    echo "FAIL: Workspace resource's properties block is not empty — it can overwrite an existing workspace's settings."
+    echo "FAIL: Workspace resource's properties block is not empty -- it can overwrite an existing workspace's settings."
     exit 1
 fi
 echo "  OK: properties is {}"
@@ -77,7 +85,7 @@ BEFORE=$(az monitor log-analytics workspace show -g "$RG" -n "$WS" --subscriptio
     --query "{sku:sku.name, retention:retentionInDays, lastSkuUpdate:sku.lastSkuUpdate}" -o json)
 echo "  before: $BEFORE"
 
-echo "[4/6] Deploying with DeployNewWorkspace=true — the real customer mistake (pointing at an existing, same-RG workspace without flipping the toggle) ..."
+echo "[4/6] Deploying with DeployNewWorkspace=true -- the real customer mistake (pointing at an existing, same-RG workspace without flipping the toggle) ..."
 az deployment group create --subscription "$SUBSCRIPTION" -g "$RG" \
     --template-file "$WRAPPER" \
     --parameters WorkspaceName="$WS" DeployNewWorkspace=true \
@@ -98,7 +106,7 @@ fi
 
 echo "[6/6] Cleanup ..."
 if [[ "$KEEP" == "true" ]]; then
-    echo "  KEEP_CANARY=true — leaving $RG in place for a faster rerun."
+    echo "  KEEP_CANARY=true -- leaving $RG in place for a faster rerun."
 else
     az group delete -n "$RG" --subscription "$SUBSCRIPTION" --yes --no-wait
     echo "  delete started for $RG"

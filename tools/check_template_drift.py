@@ -281,6 +281,48 @@ def arm_references(node, inside_definition=False):
     return used_parameters, used_variables
 
 
+def split_nested(node):
+    """Separate a nested deployment's inner template from its parent's scope.
+
+    A Microsoft.Resources/deployments resource with expressionEvaluationOptions
+    scope 'inner' carries a whole template under properties.template, which
+    declares its own parameters. Reading it as parent scope reports every inner
+    parameter as undeclared. The value bindings next to it
+    (properties.parameters) DO belong to the parent, so only the template itself
+    is split out.
+
+    Scope 'outer' is the opposite and must NOT be split: ARM evaluates that inner
+    template's expressions in the parent, which is how deploy-workspace-roles
+    reaches the parent's variables. Splitting it reported five false failures.
+    """
+    inner = []
+    if isinstance(node, dict):
+        stripped = {}
+        for key, value in node.items():
+            if (key == "properties" and isinstance(value, dict)
+                    and isinstance(value.get("template"), dict)
+                    and str(node.get("type", "")).lower() == "microsoft.resources/deployments"
+                    and value.get("expressionEvaluationOptions", {}).get("scope") == "inner"):
+                child = dict(value)
+                inner.append(child.pop("template"))
+                child_stripped, child_inner = split_nested(child)
+                inner += child_inner
+                stripped[key] = child_stripped
+                continue
+            child_stripped, child_inner = split_nested(value)
+            stripped[key] = child_stripped
+            inner += child_inner
+        return stripped, inner
+    if isinstance(node, list):
+        out = []
+        for value in node:
+            child_stripped, child_inner = split_nested(value)
+            out.append(child_stripped)
+            inner += child_inner
+        return out, inner
+    return node, inner
+
+
 def check_self_contained(failures):
     """Each template must resolve on its own.
 
@@ -291,14 +333,19 @@ def check_self_contained(failures):
     """
     for path in [ROOT_TEMPLATE, IMPORT, SYNC]:
         template = load(path)
-        used_parameters, used_variables = arm_references(template)
-        declared_parameters = set(template.get("parameters", {}))
-        declared_variables = set(template.get("variables", {}))
         label = os.path.relpath(path, ROOT)
-        for name in sorted(used_parameters - declared_parameters):
-            failures.append(f"{label}: uses parameters('{name}') at template scope but never declares it")
-        for name in sorted(used_variables - declared_variables):
-            failures.append(f"{label}: uses variables('{name}') at template scope but never declares it")
+        outer, nested = split_nested(template)
+        scopes = [(label, outer)]
+        for index, inner in enumerate(nested):
+            scopes.append(("%s (nested template %d)" % (label, index + 1), inner))
+        for scope_label, scope in scopes:
+            used_parameters, used_variables = arm_references(scope)
+            declared_parameters = set(scope.get("parameters", {}))
+            declared_variables = set(scope.get("variables", {}))
+            for name in sorted(used_parameters - declared_parameters):
+                failures.append(f"{scope_label}: uses parameters('{name}') at template scope but never declares it")
+            for name in sorted(used_variables - declared_variables):
+                failures.append(f"{scope_label}: uses variables('{name}') at template scope but never declares it")
 
 
 def check_audit_permissions(failures):
@@ -354,6 +401,196 @@ def check_no_drift(failures):
             )
 
 
+GUARD = "precheck-workspace-exists"
+EXTERNAL = "precheck-external-workspace"
+
+
+def check_workspace_guard(failures):
+    """EXP-AZURE-0198: a condition:false resource is a satisfied dependency in ARM.
+
+    Depending on the Workspace resource does not stop a deployment whose
+    WorkspaceName does not exist -- it creates the connection, both Logic Apps, the
+    workbook and the endpoint and only then fails, leaving an enabled Logic App
+    behind. The guard is a nested deployment that resolves the workspace before
+    anything else runs, and every other resource waits on it.
+
+    Both branches are asserted, because the guard is SKIPPED on the greenfield path
+    that every E2E uses: a wrong api-version or field name inside it would leave the
+    tests green and fail only at a customer.
+    """
+    template = load(ROOT_TEMPLATE)
+    resources = template["resources"]
+    by_name = {r.get("name"): r for r in resources}
+
+    for name, condition in ((GUARD, "[not(variables('deployWorkspace'))]"),
+                            (EXTERNAL, "[variables('isExternalWorkspace')]")):
+        resource = by_name.get(name)
+        if resource is None:
+            failures.append(
+                f"azuredeploy.json: {name} is gone - a wrong WorkspaceName half-installs again"
+            )
+            continue
+        if resource.get("type") != "Microsoft.Resources/deployments":
+            failures.append(f"azuredeploy.json: {name} is not a nested deployment")
+        if resource.get("condition") != condition:
+            failures.append(
+                f"azuredeploy.json: {name} condition is {resource.get('condition')!r}, "
+                f"expected {condition!r}"
+            )
+        properties = resource.get("properties", {})
+        scope = properties.get("expressionEvaluationOptions", {}).get("scope")
+        if scope != "inner":
+            # With outer scope the reference() is evaluated in the parent template,
+            # where a missing resource is a template error rather than the runtime
+            # failure this guard depends on.
+            failures.append(
+                f"azuredeploy.json: {name} evaluates expressions at {scope!r} scope, expected 'inner'"
+            )
+        outputs = properties.get("template", {}).get("outputs", {})
+        if not outputs:
+            failures.append(f"azuredeploy.json: {name} has no output, so it asserts nothing")
+        for key, output in outputs.items():
+            value = str(output.get("value", ""))
+            if "reference(" not in value:
+                # resourceId() alone is string arithmetic: it succeeds for a workspace
+                # that does not exist.
+                failures.append(
+                    f"azuredeploy.json: {name} output {key} does not call reference(), "
+                    "so it cannot detect a missing resource"
+                )
+
+    if GUARD not in by_name:
+        return
+    guard_ref = f"[resourceId('Microsoft.Resources/deployments', '{GUARD}')]"
+    external_ref = f"[resourceId('Microsoft.Resources/deployments', '{EXTERNAL}')]"
+    for resource in resources:
+        name = resource.get("name")
+        if name in (GUARD, EXTERNAL):
+            continue
+        deps = [str(d) for d in (resource.get("dependsOn") or [])]
+        if resource.get("type", "").lower() == "microsoft.operationalinsights/workspaces":
+            # The guard exists because this one may not be created; depending on it
+            # would be a cycle.
+            if guard_ref in deps:
+                failures.append("azuredeploy.json: the Workspace resource depends on its own guard")
+            continue
+        if guard_ref not in deps:
+            failures.append(
+                f"azuredeploy.json: {name} does not wait on {GUARD} - it would be created "
+                "before the workspace is known to exist"
+            )
+        if external_ref not in deps:
+            failures.append(
+                f"azuredeploy.json: {name} does not wait on {EXTERNAL} - a cross-RG deployment "
+                "onto a workspace without Microsoft Sentinel would create it and then fail"
+            )
+
+    # EXP-AZURE-0160 belongs in CI too, not only in the live canary script.
+    for resource in resources:
+        if resource.get("type", "").lower() == "microsoft.operationalinsights/workspaces":
+            if resource.get("properties"):
+                failures.append(
+                    "azuredeploy.json: the Workspace resource declares properties again - "
+                    "a redeploy can rewrite an existing workspace's pricing tier or retention"
+                )
+            if resource.get("condition") != "[variables('deployWorkspace')]":
+                failures.append(
+                    "azuredeploy.json: the Workspace condition is "
+                    f"{resource.get('condition')!r}, expected \"[variables('deployWorkspace')]\""
+                )
+
+
+def check_deploy_links(failures):
+    """Every raw.githubusercontent path in a tracked markdown file must exist here.
+
+    production/README.md shipped a Deploy to Azure button pointing at
+    master/azuredeploy.json while the template lives at
+    master/production/azuredeploy.json. Measured 8 Sep 2026: that URL returned 404,
+    so the button did nothing for anyone who clicked it in that README. The root
+    README had the right path, which is why nobody noticed.
+
+    Checked against the repository contents rather than over the network, so it
+    works in CI and fails on the commit that breaks the path rather than after it
+    is published.
+    """
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    pattern = re.compile(
+        r"raw\.githubusercontent\.com(?:%2F|/)[^/%]+(?:%2F|/)[^/%]+(?:%2F|/)master(?:%2F|/)([A-Za-z0-9._%/-]+)"
+    )
+    seen = 0
+    for directory, _, names in os.walk(repo):
+        if ".git" in directory.split(os.sep):
+            continue
+        for name in names:
+            if not name.endswith(".md"):
+                continue
+            path = os.path.join(directory, name)
+            with open(path) as handle:
+                raw = handle.read()
+            for match in pattern.finditer(raw):
+                target = match.group(1).replace("%2F", "/").rstrip(")")
+                seen += 1
+                if not os.path.exists(os.path.join(repo, target)):
+                    failures.append(
+                        f"{os.path.relpath(path, repo)}: links to master/{target}, "
+                        "which does not exist in this repository - the Deploy button 404s"
+                    )
+    if not seen:
+        # A pattern that matches nothing would make this check silently vacuous.
+        failures.append("check_deploy_links found no raw.githubusercontent link to check")
+
+
+def check_external_workspace_features(failures):
+    """Cross-RG must switch the custom-table features off, not reference them.
+
+    The DCE and both DCRs are conditioned on not(isExternalWorkspace), so a
+    cross-RG deployment does not create them -- while the Logic Apps used to pass
+    reference(<dce>) unconditionally. Measured 8 Sep 2026: a cross-RG deployment
+    with Microsoft Sentinel correctly onboarded and both prechecks Succeeded still
+    died with ResourceNotFound on SOCRadar-MSSP-DCE. The README advertises cross-RG.
+
+    Also asserts that the DCE is created for audit logging on its own. It is the
+    ingestion endpoint for BOTH DCRs, but was conditioned on the alarms table
+    alone, so EnableAuditLogging=true with EnableAlarmsTable=false referenced a
+    DCE that no branch creates.
+    """
+    template = load(ROOT_TEMPLATE)
+
+    endpoints = [r for r in template["resources"]
+                 if r.get("type", "").endswith("dataCollectionEndpoints")]
+    if len(endpoints) != 1:
+        failures.append("azuredeploy.json: expected exactly one data collection endpoint, "
+                        "found %d" % len(endpoints))
+    for endpoint in endpoints:
+        condition = str(endpoint.get("condition") or "")
+        if "EnableAuditLogging" not in condition or "EnableAlarmsTable" not in condition:
+            failures.append(
+                "azuredeploy.json: the DCE condition is %r - it is the ingestion endpoint for "
+                "both DCRs, so either feature must create it" % condition
+            )
+        if "isExternalWorkspace" not in condition:
+            failures.append("azuredeploy.json: the DCE condition no longer excludes a cross-RG workspace")
+
+    for resource in template["resources"]:
+        if resource.get("type") != "Microsoft.Logic/workflows":
+            continue
+        name = str(resource.get("name"))
+        for key, value in resource["properties"].get("parameters", {}).items():
+            raw = value.get("value")
+            if not isinstance(raw, str):
+                continue
+            if "reference(" in raw and "isExternalWorkspace" not in raw:
+                failures.append(
+                    "%s parameter %s calls reference() without excluding a cross-RG workspace: "
+                    "the resource is not created in that mode" % (name, key)
+                )
+            if key in ("EnableAuditLogging", "EnableAlarmsTable") and "isExternalWorkspace" not in raw:
+                failures.append(
+                    "%s parameter %s is passed straight through: cross-RG has no custom tables, "
+                    "so the playbook would try to write to a DCR that does not exist" % (name, key)
+                )
+
+
 def main():
     failures = []
     check_no_drift(failures)
@@ -364,6 +601,9 @@ def main():
     check_severity_writeback(failures)
     check_both(failures)
     check_bounded_waits(failures)
+    check_workspace_guard(failures)
+    check_deploy_links(failures)
+    check_external_workspace_features(failures)
     if failures:
         for failure in failures:
             print(f"  {failure}")

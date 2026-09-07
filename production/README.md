@@ -2,7 +2,7 @@
 
 Bidirectional integration for **MSSPs and holding companies** - one Microsoft Sentinel workspace imports alarms from **multiple SOCRadar Company IDs**. Microsoft Sentinel incidents are tagged per company, and closed incidents sync back to the matching SOCRadar account.
 
-[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Forcunsami%2FSOCRadar-Azure-MSSP-Incidents%2Fmaster%2Fazuredeploy.json)
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Forcunsami%2FSOCRadar-Azure-MSSP-Incidents%2Fmaster%2Fproduction%2Fazuredeploy.json)
 
 For **single-customer** deployments, use the [`SOCRadar-Azure-Incidents`](https://github.com/orcunsami/SOCRadar-Azure-Incidents) repository instead.
 
@@ -91,6 +91,34 @@ If `CompanyIds` and `CompanyNames` have different lengths, the first Logic App r
 | `SyncSeverity` | `false` | Push the Microsoft Sentinel incident severity back to SOCRadar on close. Off by default: Microsoft Sentinel has no Critical severity, so a CRITICAL alarm imports as High and writing that back would downgrade the alarm on SOCRadar |
 | `TableRetentionDays` | `365` | Retention for custom tables (30-730) |
 
+## A wrong workspace name fails before anything is created
+
+With `DeployNewWorkspace=false` -- the default -- the deployment resolves the workspace in a
+`precheck-workspace-exists` step that every other resource waits on. A name that does not
+exist leaves the resource group empty and the only failed operation is that one step.
+
+This used to half-install. Depending on the Workspace resource was not enough, because ARM
+counts a resource whose `condition` is false as a satisfied dependency -- so the Microsoft
+Sentinel API connection, the Data Collection Endpoint, the workbook and **both** Logic Apps
+were created, and only then did the deployment fail. The Import Logic App is enabled and
+billable in that state. If you are looking at a resource group left that way by an earlier
+attempt, redeploying over it with the correct name reconciles it; until then, disable the
+Logic Apps or delete the resource group.
+
+With `DeployNewWorkspace=true` a typo still does not fail: it creates a second, empty
+workspace under the misspelled name. The pre-check is skipped in that mode, because the
+workspace is not supposed to exist yet.
+
+### Redeploy to fix a failed deployment -- do not delete the Logic Apps first
+
+Redeploying over the same resource group is the way to fix a failed or partial deployment.
+Deleting the Logic Apps first is not: the role assignments are named after the workspace and
+the playbook, not after the identity they grant, so a deleted Logic App leaves its assignment
+behind with a principal that no longer exists. The next deployment computes the same
+assignment name for a new identity and Azure refuses it with
+`RoleAssignmentUpdateNotPermitted`. Delete the orphaned assignments -- the ones with no
+`principalName` -- and redeploy.
+
 ## Existing installations
 
 Deployments made before `DeployNewWorkspace` existed stated a pricing tier on the workspace
@@ -132,7 +160,25 @@ No App Registration, no Microsoft Graph permissions, no federated identity crede
 ## Cross-Region / Cross-RG
 
 - Different region -> set `WorkspaceLocation`.
-- Different resource group -> set `WorkspaceResourceGroup`. Custom tables and workbook deploy into the workspace RG; Logic Apps deploy into the deployment RG.
+- Different resource group -> set `WorkspaceResourceGroup`. The Logic Apps, their role
+  assignments and the Microsoft Sentinel API connection deploy into the deployment RG, and
+  incidents are created in the external workspace as normal.
+
+  The custom tables are **not** available in this mode, and neither is the workbook that
+  reads them. `SOCRadar_MSSP_Alarms_CL`, `SOCRadar_MSSP_AuditLog_CL`, their data collection
+  rules and the endpoint are all workspace-RG resources this deployment does not reach, so
+  `EnableAuditLogging` and `EnableAlarmsTable` are forced off when the workspace is external.
+  Deploy into the workspace's own resource group if you want them.
+
+  The earlier wording here said the tables and workbook "deploy into the workspace RG". They
+  never did, and until 8 Sep 2026 a cross-RG deployment did not even complete: the Logic Apps
+  asked for the endpoint's address and it had not been created.
+
+Cross-RG needs Microsoft Sentinel already onboarded on that workspace. This template creates
+the Microsoft Sentinel solution and its onboarding state only in the deployment resource
+group, so a `precheck-external-workspace` step reads the external workspace's onboarding
+state and stops the deployment when Microsoft Sentinel is not there. Without it the
+deployment went green and imported nothing.
 
 ## Per-company Error Isolation
 
