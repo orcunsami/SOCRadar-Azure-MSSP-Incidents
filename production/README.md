@@ -80,7 +80,7 @@ If `CompanyIds` and `CompanyNames` have different lengths, the first Logic App r
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `WorkspaceResourceGroup` | deployment RG | Set if workspace is in a different RG |
-| `DeployNewWorkspace` | `false` | Create `WorkspaceName` instead of using an existing one. The workspace resource states no workspace-level settings, so leaving this `false` against an existing workspace never touches its pricing tier, retention or daily cap -- and setting it `true` by mistake is harmless for the same reason. Ignored when `WorkspaceResourceGroup` is not the deployment RG. |
+| `DeployNewWorkspace` | `true` | Create `WorkspaceName` when it does not exist yet; an existing workspace under that name is left untouched (pricing tier, retention, daily cap). Set `false` when the workspace must already exist, so a misspelled name fails before anything is created. Ignored when `WorkspaceResourceGroup` is not the deployment RG. |
 | `SentinelRoleLevel` | `Responder` | `Responder` (least-privilege) or `Contributor` |
 | `PollingIntervalMinutes` | `5` | How often to poll SOCRadar (1-60) |
 | `InitialLookbackMinutes` | `600` | First-run lookback window (10 hours) |
@@ -93,7 +93,7 @@ If `CompanyIds` and `CompanyNames` have different lengths, the first Logic App r
 
 ## A wrong workspace name fails before anything is created
 
-With `DeployNewWorkspace=false` -- the default -- the deployment resolves the workspace in a
+With `DeployNewWorkspace=false` the deployment resolves the workspace in a
 `precheck-workspace-exists` step that every other resource waits on. A name that does not
 exist leaves the resource group empty and the only failed operation is that one step.
 
@@ -105,9 +105,10 @@ billable in that state. If you are looking at a resource group left that way by 
 attempt, redeploying over it with the correct name reconciles it; until then, disable the
 Logic Apps or delete the resource group.
 
-With `DeployNewWorkspace=true` a typo still does not fail: it creates a second, empty
-workspace under the misspelled name. The pre-check is skipped in that mode, because the
-workspace is not supposed to exist yet.
+With `DeployNewWorkspace` at its default `true` a typo does not fail: it creates a second,
+empty workspace under the misspelled name. The pre-check is skipped in that mode, because the
+workspace may not exist yet. Set it `false` when you point at an existing workspace and want a
+wrong name to stop the deployment.
 
 ### Redeploy to fix a failed deployment -- do not delete the Logic Apps first
 
@@ -135,8 +136,8 @@ az monitor log-analytics workspace show -g <resource-group> -n <workspace> \
 If `lastSkuUpdate` lines up with when you first deployed this integration and the tier isn't
 the one you picked, reset your commitment tier from **Log Analytics workspaces > Usage and
 estimated costs > Pricing tier**. The current template states no workspace-level settings at
-all, so redeploying or upgrading an existing install -- even with `DeployNewWorkspace=true` set
-by mistake -- cannot change its pricing tier, retention or daily cap.
+all, so redeploying or upgrading an existing install -- with `DeployNewWorkspace` at its default
+`true` -- cannot change its pricing tier, retention or daily cap.
 
 ## What Gets Deployed
 

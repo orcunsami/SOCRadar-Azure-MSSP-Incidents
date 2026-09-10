@@ -13,8 +13,8 @@
 # actually clicks, the defaults, was never run.
 #
 # Seven paths, each asserting a different thing:
-#   A  missing workspace, defaults            -> fails, resource group stays EMPTY
-#   B  same RG, DeployNewWorkspace=true       -> succeeds, guard SKIPPED
+#   A  missing workspace, DeployNewWorkspace=false -> fails, resource group stays EMPTY
+#   B  same RG, defaults (one click)          -> succeeds, guard SKIPPED
 #   C1 existing workspace, same RG           -> guard SUCCEEDS and resolves customerId
 #   C2 cross-RG onto a separately onboarded workspace -> assert SUCCEEDS, no endpoint
 #   D  redeploy against the workspace B made  -> the guard does not block it
@@ -103,8 +103,8 @@ az group create -n "$RG_APP" -l "$LOCATION" -o none
 az group create -n "$RG_WS"  -l "$LOCATION" -o none
 
 # --- A: the customer's typo, defaults left alone --------------------------------
-echo "[2/5] Path A: missing workspace with the parameters at their defaults ..."
-deploy "$RG_APP" path-a WorkspaceName="$MISSING" WorkspaceResourceGroup="$RG_APP"
+echo "[2/5] Path A: missing workspace with DeployNewWorkspace=false ..."
+deploy "$RG_APP" path-a WorkspaceName="$MISSING" WorkspaceResourceGroup="$RG_APP" DeployNewWorkspace=false
 state=$(az deployment group show -g "$RG_APP" -n path-a --query properties.provisioningState -o tsv 2>/dev/null)
 left=$(az resource list -g "$RG_APP" --query "length(@)" -o tsv 2>/dev/null)
 failed_steps=$(az deployment operation group list -g "$RG_APP" -n path-a \
@@ -123,8 +123,8 @@ failed_steps=$(az deployment operation group list -g "$RG_APP" -n path-a \
     || row "A blames the precheck" FAIL "the precheck was not the failing step"
 
 # --- B: greenfield, the only mode earlier tests used ----------------------------
-echo "[3/5] Path B: DeployNewWorkspace=true in the same resource group ..."
-deploy "$RG_APP" path-b WorkspaceName="$WS" WorkspaceResourceGroup="$RG_APP" DeployNewWorkspace=true
+echo "[3/5] Path B: new workspace name, parameters at their defaults ..."
+deploy "$RG_APP" path-b WorkspaceName="$WS" WorkspaceResourceGroup="$RG_APP"
 state=$(az deployment group show -g "$RG_APP" -n path-b --query properties.provisioningState -o tsv 2>/dev/null)
 [ "$state" = Succeeded ] \
     && row "B greenfield succeeds" PASS "$state" \
