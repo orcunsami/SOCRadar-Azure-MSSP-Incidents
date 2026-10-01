@@ -12,13 +12,12 @@ relevantTechniques:
   - T1526
 severity: Medium
 entityMappings:
-  - entityType: Malware
+  - entityType: Account
     fieldMappings:
       - identifier: Name
-        columnName: AlarmMainType
+        columnName: company_name
 query: |
   SOCRadar_MSSP_Alarms_CL
   | summarize Alarms=count(), Critical=countif(Severity == "CRITICAL"), High=countif(Severity == "HIGH") by company_name
-  | extend AlarmMainType = "SOCRadar MSSP"
   | order by Alarms desc
-version: 1.0.0
+version: 1.0.1

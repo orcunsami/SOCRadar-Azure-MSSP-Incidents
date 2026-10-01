@@ -10,7 +10,7 @@ For **single-customer** deployments, use the [`SOCRadar-Azure-Incidents`](https:
 
 1. Click **Deploy to Azure** above.
 2. Fill the form:
-   - `WorkspaceName` - your existing Microsoft Sentinel workspace
+   - `WorkspaceName` - your existing Microsoft Sentinel workspace. `DeployNewWorkspace` defaults to `true` and creates a workspace when the name is not found, so a typo makes a second, empty one; set it to `false` for an existing workspace
    - `CompanyIds` - comma-separated SOCRadar Company IDs (e.g. `132,200,300`)
    - `CompanyNames` - same length CSV with human-readable names (e.g. `Acme,Beta,Gamma`)
    - `SOCRadarAPIKey` - **MSSP-scoped** SOCRadar API key (one key for all Company IDs; SOCRadar's account team configures this)
@@ -19,7 +19,7 @@ For **single-customer** deployments, use the [`SOCRadar-Azure-Incidents`](https:
 ## Capabilities
 
 - **Multi-company alarm import** - one Logic App polls SOCRadar per company per cycle, configurable via `CompanyIds` + `CompanyNames` CSV parameters.
-- **Bidirectional sync** - closed Microsoft Sentinel incidents flow back to the matching SOCRadar account (`TruePositive` -> Resolved, `FalsePositive` -> False Positive, `BenignPositive` -> Mitigated).
+- **Bidirectional sync** - closed Microsoft Sentinel incidents flow back to the matching SOCRadar account (`TruePositive` and `Undetermined` -> Resolved, `FalsePositive` -> False Positive, `BenignPositive` -> Mitigated).
 - **Per-company tagging** - incident title prefixed `[MSSP-<CompanyName>] `; label `MSSP-<CompanyName>` added; deduplication key `(CompanyName, alarm_id)`, parsed back out of the incident title.
 - **Per-company error isolation** - one company's API failure logs to audit but does not block other companies.
 - **Microsoft Sentinel-native analytics** - workbook with Alarms by Company tiles, 5 hunting queries and 3 analytic rules, all keyed on `company_name`.
@@ -32,11 +32,11 @@ Deployment runs with a single Azure principal. The principal needs:
 
 | Scope | Role | Purpose |
 |-------|------|---------|
-| Resource group | Contributor | Create Logic Apps, DCE, DCRs, custom tables, workbook |
-| Workspace RG (if different) | Contributor | Create custom tables + DCRs in the workspace's RG |
+| Resource group | Owner, or Contributor + User Access Administrator | Create Logic Apps, DCE, DCRs, custom tables, workbook, and the role assignments below (Contributor alone cannot write role assignments) |
+| Workspace RG (if different) | Owner, or User Access Administrator | Assign the Logic Apps' roles on the workspace. The custom tables, DCRs and workbook are not deployed in this mode |
 | Workspace | Microsoft Sentinel Contributor | Onboard workspace to Microsoft Sentinel (one-time, if not already onboarded) |
 
-The Logic Apps' Managed Identity gets **Microsoft Sentinel Responder** on the workspace (least-privilege default) and **Monitoring Metrics Publisher** on the DCRs. No tenant-level admin role required.
+The Logic Apps' Managed Identity gets **Microsoft Sentinel Responder** on the workspace (least-privilege default), **Log Analytics Reader** on the workspace (Import) and **Monitoring Metrics Publisher** on the DCRs. No tenant-level admin role required.
 
 ## Documentation
 

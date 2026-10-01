@@ -94,7 +94,7 @@ Click the **Deploy to Azure** button on your new repository's README. Verify the
 
 - `CompanyIds` (CSV, required)
 - `CompanyNames` (CSV, required, same length)
-- `SocradarApiKey` (required, MSSP-scoped)
+- `SOCRadarAPIKey` (required, MSSP-scoped)
 - `WorkspaceName` (required)
 - `WorkspaceResourceGroup` (optional, defaults to deployment RG)
 - `WorkspaceLocation` (optional)
@@ -111,8 +111,8 @@ You can cancel without deploying - the goal is to confirm the link resolves to t
 
 **Features in this v1.0.0 release:**
 - Multi-company alarm import - one Logic App polls SOCRadar per company per cycle, configurable via `CompanyIds` + `CompanyNames` CSV parameters.
-- Bidirectional sync - closed Microsoft Sentinel incidents flow back to the matching SOCRadar account (`TruePositive` -> Resolved, `FalsePositive` -> False Positive, `BenignPositive` -> Mitigated).
-- Per-company incident tagging - title prefixed `[<CompanyName>]`, label `Company:<CompanyName>`.
+- Bidirectional sync - closed Microsoft Sentinel incidents flow back to the matching SOCRadar account (`TruePositive` and `Undetermined` -> Resolved, `FalsePositive` -> False Positive, `BenignPositive` -> Mitigated).
+- Per-company incident tagging - title prefixed `[MSSP-<CompanyName>]`, label `MSSP-<CompanyName>`.
 - Per-company error isolation - one company's API failure logs to audit but does not block other companies.
 - Custom Log Analytics tables `SOCRadar_MSSP_Alarms_CL` + `SOCRadar_MSSP_AuditLog_CL` with `company_name` column for KQL pivoting.
 - 1 Microsoft Sentinel workbook (Alarms by Company + Alarms by Company and Severity tiles), 5 hunting queries, 3 analytic rules - all keyed on `company_name`.
@@ -130,7 +130,7 @@ Customers go to your repository and click **Deploy to Azure**. The Azure Portal 
 
 | Customer profile | Deploy parameters |
 |------------------|--------------------|
-| MSSP monitoring N customer companies from one Microsoft Sentinel workspace | `CompanyIds=132,200,300`, `CompanyNames=Acme,Beta,Gamma`, MSSP-scoped `SocradarApiKey`, existing `WorkspaceName` |
+| MSSP monitoring N customer companies from one Microsoft Sentinel workspace | `CompanyIds=132,200,300`, `CompanyNames=Acme,Beta,Gamma`, MSSP-scoped `SOCRadarAPIKey`, existing `WorkspaceName` with `DeployNewWorkspace=false` |
 | Holding company with multiple legal entities | Same - list each entity's SOCRadar Company ID + a human-readable name |
 | Single-company customer | **Use the single-customer `SOCRadar` solution instead.** This MSSP edition is over-engineered for the single-company case. |
 

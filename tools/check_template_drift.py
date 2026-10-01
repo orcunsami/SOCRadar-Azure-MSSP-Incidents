@@ -210,6 +210,23 @@ def check_sync(failures):
     elif "Add_Synced_Tag" not in (guard.get("actions") or {}):
         failures.append("sync: Add_Synced_Tag is not inside Check_SOCRadar_Write_Succeeded")
 
+    # SOCRadar answers HTTP 200 with is_success:false when it refuses the change. The
+    # "synced" audit row must follow the success branch only, and the refusal must leave
+    # a row of its own, or the run is green and the failure leaves no trace.
+    marker = "/Check_SOCRadar_Write_Succeeded/"
+    synced = [path for path, _, action in walk(actions) if "IncidentSynced" in json.dumps(action.get("inputs", ""))]
+    rejected = [path for path, _, action in walk(actions) if "SyncWriteRejected" in json.dumps(action.get("inputs", ""))]
+    if not synced or any(marker not in path or f"{marker}else" in path for path in synced):
+        failures.append(
+            "sync: the IncidentSynced audit row is not confined to the success branch of "
+            "Check_SOCRadar_Write_Succeeded, so it is written when SOCRadar refused the change"
+        )
+    if not rejected or any(f"{marker}else" not in path for path in rejected):
+        failures.append(
+            "sync: the else branch of Check_SOCRadar_Write_Succeeded does not write a "
+            "SyncWriteRejected audit row, so a refused status change is silent"
+        )
+
 
 def check_severity_writeback(failures):
     """Writing the Sentinel severity back to SOCRadar must be opt-in.
@@ -234,6 +251,91 @@ def check_severity_writeback(failures):
         failures.append(
             "sync: Map_Severity no longer emits the upper-case severities SOCRadar stores"
         )
+
+
+def stream_columns(template):
+    """Declared columns per DCR stream, keyed by the parameter or variable that names it."""
+    variables = template.get("variables", {})
+    columns = {}
+    for resource in template.get("resources", []):
+        if resource.get("type") != "Microsoft.Insights/dataCollectionRules":
+            continue
+        for stream, body in resource["properties"].get("streamDeclarations", {}).items():
+            match = re.fullmatch(r"\[variables\('([^']+)'\)\]", stream)
+            key = match.group(1) if match else stream
+            columns[key] = {column["name"] for column in body["columns"]}
+    return columns
+
+
+def check_audit_columns(failures):
+    """A DCR drops a column it did not declare, silently (EXP-AZURE-0138).
+
+    Every audit row the playbooks send must use only the columns of the audit stream.
+    The Sync playbook has no DCR of its own, so it is read against the root template's.
+    """
+    # the audit stream is the declared one that carries an EventType column
+    audit = next(
+        (cols for cols in stream_columns(load(ROOT_TEMPLATE)).values() if "EventType" in cols), None
+    )
+    if not audit:
+        failures.append("audit columns: no audit stream declaration found in azuredeploy.json")
+        return
+    for label, path in (("root", ROOT_TEMPLATE), ("import", IMPORT), ("sync", SYNC)):
+        for workflow in workflows(load(path)):
+            for _, name, action in walk(workflow["properties"]["definition"]["actions"]):
+                inputs = action.get("inputs")
+                if not isinstance(inputs, dict) or "AuditStreamName" not in str(inputs.get("uri", "")):
+                    continue
+                for row in inputs.get("body", []):
+                    extra = sorted(set(row) - audit)
+                    if extra:
+                        failures.append(
+                            f"{label}: {name} sends {extra} to the audit table, which the DCR "
+                            "does not declare and would drop silently"
+                        )
+
+
+DOC_FILES = ["README.md", "PUBLISHING.md", "CUSTOMER-TEST-RUNBOOK-MSSP.md", os.path.join("production", "README.md")]
+# The incident title is `[MSSP-<CompanyName>] #<id> ...` and the label is `MSSP-<CompanyName>`.
+# The single-customer product's `[<CompanyName>]` / `Company:<name>` wording is not this product's.
+STALE_TAGGING = re.compile(r"Company:\s?<|\[<CompanyName>\]")
+
+
+def check_tagging_wording(failures):
+    repo = os.path.dirname(ROOT)
+    paths = [os.path.join(repo, name) for name in DOC_FILES] + [ROOT_TEMPLATE, IMPORT, SYNC]
+    for path in paths:
+        with open(path) as handle:
+            for number, line in enumerate(handle, 1):
+                if STALE_TAGGING.search(line):
+                    failures.append(
+                        f"{os.path.relpath(path, repo)}:{number}: describes the title or tag as "
+                        "`[<CompanyName>]` / `Company:<name>`; the code writes `[MSSP-<CompanyName>]` "
+                        "and `MSSP-<CompanyName>`"
+                    )
+
+
+def check_outputs(failures):
+    """An output must be gated by the same condition as the resource it names."""
+    template = load(ROOT_TEMPLATE)
+    conditions = {}
+    for resource in template["resources"]:
+        condition = resource.get("condition")
+        if condition:
+            conditions[resource["type"]] = condition
+    wanted = {
+        "dceName": "Microsoft.Insights/dataCollectionEndpoints",
+        "workbookName": "Microsoft.Insights/workbooks",
+    }
+    for output, resource_type in wanted.items():
+        condition = conditions.get(resource_type, "")
+        inner = condition[1:-1] if condition.startswith("[") else condition
+        value = template["outputs"].get(output, {}).get("value", "")
+        if not inner or inner not in value:
+            failures.append(
+                f"outputs: {output} is not gated by the condition of its resource ({resource_type}), "
+                "so it names something that was not deployed"
+            )
 
 
 def check_both(failures):
@@ -600,6 +702,9 @@ def main():
     check_sync(failures)
     check_severity_writeback(failures)
     check_both(failures)
+    check_audit_columns(failures)
+    check_tagging_wording(failures)
+    check_outputs(failures)
     check_bounded_waits(failures)
     check_workspace_guard(failures)
     check_deploy_links(failures)

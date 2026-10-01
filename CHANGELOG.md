@@ -11,12 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 The only tag in this repository is `v1.0.0` (annotated, 15 May 2026, commit
-`6a13b6a`) and it has no GitHub release. The 1.1.0 heading below was written on
+`4c3bde3`) and it has no GitHub release. The 1.1.0 heading below was written on
 21 Aug 2026 but was never tagged, and two commits landed after it without a
 changelog entry -- they are recorded here.
 
 ### Fixed
 
+- **A refused status change no longer logs as synced.** SOCRadar answers HTTP 200 with
+  `is_success: false` when it refuses a change. The `IncidentSynced` audit row was written
+  regardless; it now follows the success branch only, and the refusal writes a
+  `SyncWriteRejected` row carrying SOCRadar's message.
+- **Audit rows no longer send `CompanyId`.** The audit table has no such column, so the
+  data collection rule dropped it silently. A drift check now compares every audit row to
+  the declared columns.
+- **The unsynced-incident rule dedups `SecurityIncident`.** The table is append-only, so a
+  closed incident that was later labelled `Synced` still matched on its older row.
+- **Documentation names the real title and label** (`[MSSP-<CompanyName>]`,
+  `MSSP-<CompanyName>`), the deploying principal's real roles, and the workspace default.
+  `socradar-kql-queries.kql` is rewritten for the MSSP tables.
 - **A wrong workspace name no longer half-installs.** The deployment resolves the
   workspace in a `precheck-workspace-exists` nested deployment that every other
   resource waits on. ARM counts a resource whose `condition` is false as a
@@ -60,7 +72,7 @@ changelog entry -- they are recorded here.
   so the default silently targeted whatever that id points at today. It now uses
   `TEST_SUBSCRIPTION` or the logged-in context and refuses to run without one.
 - **A redeploy cannot rewrite an existing workspace.** `DeployNewWorkspace`
-  (default `false`) and a Workspace resource that declares no properties, from the
+  (default `true` now, `false` in those commits) and a Workspace resource that declares no properties, from the
   27 Aug commits. (EXP-AZURE-0160)
 
 ### Added
@@ -86,7 +98,7 @@ changelog entry -- they are recorded here.
   `deploy-workspace-roles` when the prechecks were added -- scope `outer` is
   evaluated in the parent and must not be split, scope `inner` must.
 
-## [1.1.0] - 2026-08-21
+## Drafted as 1.1.0, never tagged - 2026-08-21
 
 Correctness release. Ports the alarm-import fixes made in the single-customer
 integration (`SOCRadar-Azure-Incidents`) in August 2026, and closes the gap
@@ -234,9 +246,9 @@ that monitors N SOCRadar Company IDs from a single Microsoft Sentinel deployment
 
 ### Notes
 
-- **MSSP-scoped API key required.** The single `SocradarApiKey` must cover every
+- **MSSP-scoped API key required.** The single `SOCRadarAPIKey` must cover every
   Company ID listed in `CompanyIds`. SOCRadar's account team configures this on
-  their side. Documented in README and `CUSTOMER-TEST-RUNBOOK.md`.
+  their side. Documented in README and `CUSTOMER-TEST-RUNBOOK-MSSP.md`.
 - **Logic App based.** No Entra ID App Registration, no FIC, no Graph
   permissions. The Logic Apps authenticate to Microsoft Sentinel via Azure Managed
   Identity.

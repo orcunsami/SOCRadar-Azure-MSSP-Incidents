@@ -35,8 +35,9 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TEMPLATE="$ROOT/azuredeploy.json"
 
 # No hardcoded subscription default: an id baked into a sibling script once aimed a
-# test at an account that had been closed. The logged-in context is the target, and
-# it is printed, so a run can never be about a subscription nobody looked at.
+# test at an account that had been closed. TEST_SUBSCRIPTION names the target, it must
+# equal the logged-in context, and it is printed, so a run can never be about a
+# subscription nobody looked at.
 #
 # Not passed per command either. `az --subscription <id> group create` is rejected
 # by this CLI -- the flag only parses AFTER the subcommand -- and a shell variable
@@ -47,7 +48,13 @@ if [ -z "$SUBSCRIPTION" ]; then
     echo "ERROR: not logged in. Run 'az login'." >&2
     exit 2
 fi
-if [ -n "${TEST_SUBSCRIPTION:-}" ] && [ "$TEST_SUBSCRIPTION" != "$SUBSCRIPTION" ]; then
+# The target must be named, not inherited: a context that drifted to a stale account
+# would otherwise run seven deployments there without anyone having chosen it.
+if [ -z "${TEST_SUBSCRIPTION:-}" ]; then
+    echo "ERROR: set TEST_SUBSCRIPTION to the subscription this run may deploy into." >&2
+    exit 2
+fi
+if [ "$TEST_SUBSCRIPTION" != "$SUBSCRIPTION" ]; then
     echo "ERROR: TEST_SUBSCRIPTION is $TEST_SUBSCRIPTION but the active context is" >&2
     echo "       $SUBSCRIPTION. Run: az account set --subscription $TEST_SUBSCRIPTION" >&2
     exit 2
@@ -82,7 +89,7 @@ cleanup() {
     for rg in "$RG_APP" "$RG_WS" "$RG_BARE" "$RG_E" "$RG_X" "$RG_ONB" "$RG_F"; do
         az group delete -n "$rg" --yes --no-wait -o none 2>/dev/null
     done
-    echo "cleanup: delete queued for $RG_APP $RG_WS $RG_BARE $RG_E $RG_X $RG_ONB $RG_F"
+    echo "cleanup: delete queued, NOT verified (az group exists -n <rg>), for $RG_APP $RG_WS $RG_BARE $RG_E $RG_X $RG_ONB $RG_F"
 }
 trap cleanup EXIT
 

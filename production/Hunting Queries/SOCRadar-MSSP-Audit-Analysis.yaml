@@ -14,10 +14,9 @@ entityMappings:
   - entityType: Account
     fieldMappings:
       - identifier: Name
-        columnName: AlarmId
+        columnName: company_name
 query: |
   union isfuzzy=true SOCRadar_MSSP_AuditLog_CL
   | summarize Events=count(), LastSeen=max(TimeGenerated) by company_name, EventType
-  | extend AlarmId = ""
   | order by LastSeen desc
-version: 1.0.0
+version: 1.0.1

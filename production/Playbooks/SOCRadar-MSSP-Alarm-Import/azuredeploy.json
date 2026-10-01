@@ -2,13 +2,13 @@
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "metadata": {
-    "title": "SOCRadar-Alarm-Import",
-    "description": "Imports alarms from SOCRadar with optional audit logging and custom table storage. Supports all statuses or OPEN only.",
+    "title": "SOCRadar-MSSP-Alarm-Import",
+    "description": "Imports alarms for several SOCRadar companies into Microsoft Sentinel, one incident per alarm titled [MSSP-<CompanyName>] #<alarm_id>. Optional audit logging and custom table storage. Supports all statuses or OPEN only.",
     "version": "1.0.0",
     "author": {
       "name": "SOCRadar"
     },
-    "lastUpdateTime": "2026-08-21T00:00:00.000Z",
+    "lastUpdateTime": "2026-10-01T00:00:00.000Z",
     "support": {
       "tier": "Partner"
     }
@@ -135,7 +135,7 @@
     "CompanyNames": {
       "type": "string",
       "metadata": {
-        "description": "Comma-separated human-readable names matching CompanyIds positionally (e.g. Acme,Beta,Gamma). Appears in incident titles as [<CompanyName>] prefix and as Company:<name> tag."
+        "description": "Comma-separated human-readable names matching CompanyIds positionally (e.g. Acme,Beta,Gamma). Appears in incident titles as the [MSSP-<CompanyName>] prefix and as the MSSP-<CompanyName> label."
       }
     },
     "location": {
@@ -287,7 +287,7 @@
             {
               "name": "EventType",
               "type": "string",
-              "description": "AlarmImported, AlarmSynced, Error"
+              "description": "AlarmImported, ImportError, CompanyImportFailed, IncidentSynced, SyncWriteRejected, CompanySkippedUnmatched"
             },
             {
               "name": "AlarmId",
@@ -1164,7 +1164,6 @@
                                                   "Severity": "@{items('For_Each_Alarm')?['alarm_risk_level']}",
                                                   "Message": "@{if(equals(actions('Check_If_Open_Status')['status'], 'Succeeded'), concat('Alarm imported for company ', items('For_Each_Company')?['CompanyName']), concat('Import failed for alarm ', string(items('For_Each_Alarm')?['alarm_id']), ' - company ', items('For_Each_Company')?['CompanyName']))}",
                                                   "FullAlarmJson": "@items('For_Each_Alarm')",
-                                                  "CompanyId": "@{items('For_Each_Company')?['CompanyId']}",
                                                   "company_name": "@{items('For_Each_Company')?['CompanyName']}"
                                                 }
                                               ]
@@ -1346,7 +1345,6 @@
                                 "Severity": "High",
                                 "Message": "@{concat('Company import failed: ', items('For_Each_Company')?['CompanyName'], ' (ID: ', items('For_Each_Company')?['CompanyId'], ')')}",
                                 "FullAlarmJson": "",
-                                "CompanyId": "@{items('For_Each_Company')?['CompanyId']}",
                                 "company_name": "@{items('For_Each_Company')?['CompanyName']}"
                               }
                             ]

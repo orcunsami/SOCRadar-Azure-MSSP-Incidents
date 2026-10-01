@@ -2,11 +2,11 @@
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "metadata": {
-    "title": "SOCRadar Alarms for Microsoft Sentinel",
-    "description": "Bidirectional integration: Import SOCRadar alarms to Microsoft Sentinel, sync closed incidents back to SOCRadar. Includes optional audit logging, custom alarms table for analytics, and Workbook dashboard.",
+    "title": "SOCRadar MSSP Alarms for Microsoft Sentinel",
+    "description": "Multi-company bidirectional integration: imports SOCRadar alarms for several Company IDs into one Microsoft Sentinel workspace and syncs closed incidents back to the matching company. Includes optional audit logging, custom alarms table and Workbook dashboard.",
     "version": "1.0.0",
     "author": "SOCRadar",
-    "lastUpdateTime": "2026-02-20T00:00:00.000Z"
+    "lastUpdateTime": "2026-10-01T00:00:00.000Z"
   },
   "parameters": {
     "WorkspaceName": {
@@ -124,7 +124,7 @@
     "CompanyNames": {
       "type": "string",
       "metadata": {
-        "description": "Comma-separated human-readable company names matching CompanyIds positionally (e.g. Acme,Beta,Gamma). Appears as [<CompanyName>] prefix in incident titles."
+        "description": "Comma-separated human-readable company names matching CompanyIds positionally (e.g. Acme,Beta,Gamma). Appears as the [MSSP-<CompanyName>] prefix in incident titles and as the MSSP-<CompanyName> label."
       }
     },
     "location": {
@@ -153,7 +153,7 @@
     "AlarmsTableName": "SOCRadar_MSSP_Alarms_CL",
     "AlarmsDcrName": "SOCRadar-MSSP-Alarms-DCR",
     "AlarmsStreamName": "Custom-SOCRadar_MSSP_Alarms_CL",
-    "WorkbookName": "SOCRadar-Analytics-Workbook",
+    "WorkbookName": "SOCRadar MSSP Dashboard",
     "SentinelContributorRoleId": "ab8e14d6-4a74-4a29-9ba8-549422addade",
     "SentinelResponderRoleId": "3e150937-b8fe-4cfb-8069-0eaf05ecd056",
     "sentinelRoleDefinitionId": "[if(equals(parameters('SentinelRoleLevel'), 'Responder'), variables('SentinelResponderRoleId'), variables('SentinelContributorRoleId'))]",
@@ -303,7 +303,7 @@
             {
               "name": "EventType",
               "type": "string",
-              "description": "Type: AlarmImported, AlarmSynced, Error"
+              "description": "Type: AlarmImported, ImportError, CompanyImportFailed, IncidentSynced, SyncWriteRejected, CompanySkippedUnmatched"
             },
             {
               "name": "AlarmId",
@@ -1324,7 +1324,6 @@
                                                   "Severity": "@{items('For_Each_Alarm')?['alarm_risk_level']}",
                                                   "Message": "@{if(equals(actions('Check_If_Open_Status')['status'], 'Succeeded'), concat('Alarm imported for company ', items('For_Each_Company')?['CompanyName']), concat('Import failed for alarm ', string(items('For_Each_Alarm')?['alarm_id']), ' - company ', items('For_Each_Company')?['CompanyName']))}",
                                                   "FullAlarmJson": "@items('For_Each_Alarm')",
-                                                  "CompanyId": "@{items('For_Each_Company')?['CompanyId']}",
                                                   "company_name": "@{items('For_Each_Company')?['CompanyName']}"
                                                 }
                                               ]
@@ -1506,7 +1505,6 @@
                                 "Severity": "High",
                                 "Message": "@{concat('Company import failed: ', items('For_Each_Company')?['CompanyName'], ' (ID: ', items('For_Each_Company')?['CompanyId'], ')')}",
                                 "FullAlarmJson": "",
-                                "CompanyId": "@{items('For_Each_Company')?['CompanyId']}",
                                 "company_name": "@{items('For_Each_Company')?['CompanyName']}"
                               }
                             ]
@@ -2080,59 +2078,6 @@
                       },
                       "runAfter": {}
                     },
-                    "Check_Sync_Audit": {
-                      "type": "If",
-                      "expression": {
-                        "and": [
-                          {
-                            "equals": [
-                              "@parameters('EnableAuditLogging')",
-                              true
-                            ]
-                          }
-                        ]
-                      },
-                      "actions": {
-                        "Log_Sync_Event": {
-                          "type": "Http",
-                          "inputs": {
-                            "method": "POST",
-                            "uri": "@{concat(parameters('AuditDcrEndpoint'), '/dataCollectionRules/', parameters('AuditDcrImmutableId'), '/streams/', parameters('AuditStreamName'), '?api-version=2023-01-01')}",
-                            "headers": {
-                              "Content-Type": "application/json"
-                            },
-                            "authentication": {
-                              "type": "ManagedServiceIdentity",
-                              "audience": "https://monitor.azure.com"
-                            },
-                            "body": [
-                              {
-                                "TimeGenerated": "@{utcNow()}",
-                                "EventType": "IncidentSynced",
-                                "AlarmId": "@{outputs('Extract_Alarm_ID')}",
-                                "IncidentId": "@{items('For_Each_Incident')?['properties']?['incidentNumber']}",
-                                "CompanyId": "@{first(body('Filter_Company_Config'))?['CompanyId']}",
-                                "AlarmType": "",
-                                "Status": "@{coalesce(items('For_Each_Incident')?['properties']?['classification'], 'Unclassified')}",
-                                "Severity": "@{coalesce(items('For_Each_Incident')?['properties']?['severity'], 'Medium')}",
-                                "Message": "@{concat('Incident synced: classification=', coalesce(items('For_Each_Incident')?['properties']?['classification'], 'Unknown'))}",
-                                "FullAlarmJson": "",
-                                "company_name": "@{first(body('Filter_Company_Config'))?['CompanyName']}"
-                              }
-                            ]
-                          },
-                          "runAfter": {}
-                        }
-                      },
-                      "else": {
-                        "actions": {}
-                      },
-                      "runAfter": {
-                        "Check_SOCRadar_Write_Succeeded": [
-                          "Succeeded"
-                        ]
-                      }
-                    },
                     "Check_SOCRadar_Write_Succeeded": {
                       "type": "If",
                       "expression": {
@@ -2187,10 +2132,111 @@
                             }
                           },
                           "runAfter": {}
+                        },
+                        "Check_Sync_Audit": {
+                          "type": "If",
+                          "expression": {
+                            "and": [
+                              {
+                                "equals": [
+                                  "@parameters('EnableAuditLogging')",
+                                  true
+                                ]
+                              }
+                            ]
+                          },
+                          "actions": {
+                            "Log_Sync_Event": {
+                              "type": "Http",
+                              "inputs": {
+                                "method": "POST",
+                                "uri": "@{concat(parameters('AuditDcrEndpoint'), '/dataCollectionRules/', parameters('AuditDcrImmutableId'), '/streams/', parameters('AuditStreamName'), '?api-version=2023-01-01')}",
+                                "headers": {
+                                  "Content-Type": "application/json"
+                                },
+                                "authentication": {
+                                  "type": "ManagedServiceIdentity",
+                                  "audience": "https://monitor.azure.com"
+                                },
+                                "body": [
+                                  {
+                                    "TimeGenerated": "@{utcNow()}",
+                                    "EventType": "IncidentSynced",
+                                    "AlarmId": "@{outputs('Extract_Alarm_ID')}",
+                                    "IncidentId": "@{items('For_Each_Incident')?['properties']?['incidentNumber']}",
+                                    "AlarmType": "",
+                                    "Status": "@{coalesce(items('For_Each_Incident')?['properties']?['classification'], 'Unclassified')}",
+                                    "Severity": "@{coalesce(items('For_Each_Incident')?['properties']?['severity'], 'Medium')}",
+                                    "Message": "@{concat('Incident synced: classification=', coalesce(items('For_Each_Incident')?['properties']?['classification'], 'Unknown'))}",
+                                    "FullAlarmJson": "",
+                                    "company_name": "@{first(body('Filter_Company_Config'))?['CompanyName']}"
+                                  }
+                                ]
+                              },
+                              "runAfter": {}
+                            }
+                          },
+                          "else": {
+                            "actions": {}
+                          },
+                          "runAfter": {
+                            "Add_Synced_Tag": [
+                              "Succeeded"
+                            ]
+                          }
                         }
                       },
                       "else": {
-                        "actions": {}
+                        "actions": {
+                          "Check_Sync_Rejected_Audit": {
+                            "type": "If",
+                            "expression": {
+                              "and": [
+                                {
+                                  "equals": [
+                                    "@parameters('EnableAuditLogging')",
+                                    true
+                                  ]
+                                }
+                              ]
+                            },
+                            "actions": {
+                              "Log_Sync_Rejected": {
+                                "type": "Http",
+                                "inputs": {
+                                  "method": "POST",
+                                  "uri": "@{concat(parameters('AuditDcrEndpoint'), '/dataCollectionRules/', parameters('AuditDcrImmutableId'), '/streams/', parameters('AuditStreamName'), '?api-version=2023-01-01')}",
+                                  "headers": {
+                                    "Content-Type": "application/json"
+                                  },
+                                  "authentication": {
+                                    "type": "ManagedServiceIdentity",
+                                    "audience": "https://monitor.azure.com"
+                                  },
+                                  "body": [
+                                    {
+                                      "TimeGenerated": "@{utcNow()}",
+                                      "EventType": "SyncWriteRejected",
+                                      "AlarmId": "@{outputs('Extract_Alarm_ID')}",
+                                      "IncidentId": "@{items('For_Each_Incident')?['properties']?['incidentNumber']}",
+                                      "AlarmType": "",
+                                      "Status": "@{coalesce(items('For_Each_Incident')?['properties']?['classification'], 'Unclassified')}",
+                                      "Severity": "High",
+                                      "Message": "@{concat('SOCRadar did not accept the status change for alarm ', outputs('Extract_Alarm_ID'), ': ', take(string(coalesce(body('Update_SOCRadar_Status')?['message'], 'no message returned')), 300))}",
+                                      "FullAlarmJson": "",
+                                      "company_name": "@{first(body('Filter_Company_Config'))?['CompanyName']}"
+                                    }
+                                  ]
+                                },
+                                "runAfter": {}
+                              }
+                            },
+                            "else": {
+                              "actions": {}
+                            },
+                            "runAfter": {}
+                          }
+                        }
                       },
                       "runAfter": {
                         "Update_SOCRadar_Status": [
@@ -2318,7 +2364,6 @@
                             "EventType": "CompanySkippedUnmatched",
                             "AlarmId": "@{outputs('Extract_Alarm_ID')}",
                             "IncidentId": "@{items('For_Each_Incident')?['properties']?['incidentNumber']}",
-                            "CompanyId": "",
                             "AlarmType": "",
                             "Status": "@{coalesce(items('For_Each_Incident')?['properties']?['classification'], 'Unclassified')}",
                             "Severity": "@{coalesce(items('For_Each_Incident')?['properties']?['severity'], 'Medium')}",
@@ -2623,11 +2668,11 @@
     },
     "dceName": {
       "type": "string",
-      "value": "[if(parameters('EnableAlarmsTable'), variables('DceName'), 'N/A')]"
+      "value": "[if(and(or(parameters('EnableAuditLogging'), parameters('EnableAlarmsTable')), not(variables('isExternalWorkspace'))), variables('DceName'), 'N/A')]"
     },
     "workbookName": {
       "type": "string",
-      "value": "[if(parameters('EnableWorkbook'), variables('WorkbookName'), 'N/A')]"
+      "value": "[if(and(parameters('EnableWorkbook'), parameters('EnableAlarmsTable'), not(variables('isExternalWorkspace'))), variables('WorkbookName'), 'N/A')]"
     },
     "pollingInterval": {
       "type": "string",

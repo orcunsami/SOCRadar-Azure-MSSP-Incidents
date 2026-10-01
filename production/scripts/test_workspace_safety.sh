@@ -23,8 +23,11 @@ if [ -z "$SUBSCRIPTION" ]; then
 fi
 echo "[0/6] Target subscription: $SUBSCRIPTION"
 LOCATION="${TEST_LOCATION:-westeurope}"
-RG="rg-workspace-safety-canary-mssp"
-WS="workspace-safety-canary-mssp"
+# A deleted workspace stays soft-deleted for 14 days and its name cannot be created again,
+# so every run gets its own name. Set CANARY_ID (with KEEP_CANARY=true) to reuse a canary.
+CANARY_ID="${CANARY_ID:-$(date +%s)}"
+RG="rg-workspace-safety-canary-mssp-$CANARY_ID"
+WS="workspace-safety-canary-mssp-$CANARY_ID"
 KEEP="${KEEP_CANARY:-false}"
 
 WORKDIR=$(mktemp -d)
@@ -106,10 +109,10 @@ fi
 
 echo "[6/6] Cleanup ..."
 if [[ "$KEEP" == "true" ]]; then
-    echo "  KEEP_CANARY=true -- leaving $RG in place for a faster rerun."
+    echo "  KEEP_CANARY=true -- leaving $RG in place; rerun with CANARY_ID=$CANARY_ID to reuse it."
 else
     az group delete -n "$RG" --subscription "$SUBSCRIPTION" --yes --no-wait
-    echo "  delete started for $RG"
+    echo "  delete queued for $RG, not verified: check 'az group exists -n $RG' later"
 fi
 
 exit $RESULT

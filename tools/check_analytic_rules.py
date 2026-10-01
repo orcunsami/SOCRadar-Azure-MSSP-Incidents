@@ -38,7 +38,8 @@ KQL_WORDS = {
     "d", "h", "m", "s", "print", "mv_expand", "evaluate", "narrow",
     "kind", "inner", "innerunique", "leftouter", "rightouter", "fullouter",
     "leftsemi", "rightsemi", "leftanti", "rightanti", "anti", "hint",
-    "isfuzzy",
+    "isfuzzy", "render", "timechart", "piechart", "columnchart", "percentile",
+    "format_datetime", "datetime_diff", "between", "arg_max", "countif",
 }
 
 # Techniques used by this repo, mapped to their ATT&CK tactics. Azure rejects a
@@ -82,6 +83,46 @@ def custom_table_schemas():
     return schemas
 
 
+def emitted_event_types():
+    """Every EventType the playbooks write to the audit table, read from the templates."""
+    found = set()
+
+    def visit(node):
+        if isinstance(node, dict):
+            value = node.get("EventType")
+            if isinstance(value, str):
+                three_arg = re.findall(r"\)\s*,\s*'(\w+)'\s*,\s*'(\w+)'\s*\)", value)
+                if three_arg:
+                    found.update(name for pair in three_arg for name in pair)
+                else:
+                    found.add(value)
+            for child in node.values():
+                visit(child)
+        elif isinstance(node, list):
+            for child in node:
+                visit(child)
+
+    for path in [os.path.join(ROOT, "azuredeploy.json")] + sorted(
+        glob.glob(os.path.join(ROOT, "Playbooks", "*", "azuredeploy.json"))
+    ):
+        with open(path) as handle:
+            visit(json.load(handle))
+    return found
+
+
+EVENT_LITERAL = re.compile(
+    r'\bEventType\b\s*(?:(?:==|=~|!=|has|contains)\s*"([^"]*)"|in~?\s*\(([^)]*)\))'
+)
+
+# SecurityIncident is append-only: every change adds a row. The newest row per incident
+# must be taken BEFORE any filter on Status or Labels, or a filter keeps the stale row
+# (an incident closed, then labelled Synced, still matches "closed and not Synced").
+INCIDENT_DEDUP = re.compile(
+    r"SecurityIncident\s*(?:\|\s*where\s+TimeGenerated[^|]*)*"
+    r"\|\s*summarize\s+arg_max\(TimeGenerated,\s*\*\)\s+by\s+IncidentNumber"
+)
+
+
 def strip_strings(query):
     """Blank out string literals so their contents are not read as identifiers."""
     query = re.sub(r'@?"(?:[^"\\]|\\.)*"', '""', query)
@@ -109,12 +150,27 @@ def string_literals_for(query, column):
     return found
 
 
-def check_rule(path, schemas):
-    with open(path) as handle:
-        rule = yaml.safe_load(handle)
+def query_problems(query, schemas, events):
     problems = []
-    query = rule.get("query", "")
     clean = strip_strings(query)
+
+    if re.search(r"\bSecurityIncident\b", clean) and not INCIDENT_DEDUP.search(query):
+        problems.append(
+            "SecurityIncident is read without 'summarize arg_max(TimeGenerated, *) by IncidentNumber' "
+            "ahead of any other filter; the table is append-only, so a stale row can match"
+        )
+    if "[SOCRadar]" in query:
+        problems.append(
+            'matches the title "[SOCRadar]", which this product never writes; '
+            'its incident titles start with "[MSSP-<CompanyName>]"'
+        )
+    for single, many in EVENT_LITERAL.findall(query):
+        for literal in ([single] if single else re.findall(r'"([^"]*)"', many)):
+            if literal and literal not in events:
+                problems.append(
+                    f"EventType is compared to \"{literal}\", which no playbook writes "
+                    f"(they write {sorted(events)})"
+                )
 
     tables = [table for table in schemas if re.search(rf"\b{re.escape(table)}\b", clean)]
     if tables:
@@ -137,6 +193,13 @@ def check_rule(path, schemas):
                         f"'{column}' is compared to \"{literal}\" but SOCRadar sends "
                         f"\"{literal.upper()}\"; the rule would match nothing"
                     )
+    return problems
+
+
+def check_rule(path, schemas, events):
+    with open(path) as handle:
+        rule = yaml.safe_load(handle)
+    problems = query_problems(rule.get("query", ""), schemas, events)
 
     tactics = set(rule.get("tactics", []))
     for technique in rule.get("relevantTechniques", []):
@@ -154,8 +217,40 @@ def check_rule(path, schemas):
     return problems
 
 
+KQL_FILE = os.path.join(ROOT, "socradar-kql-queries.kql")
+BUILTIN_TABLES = ("SecurityIncident", "AzureDiagnostics")
+
+
+def check_kql_file(schemas, events):
+    """Each recipe in the .kql file, read the same way as a rule.
+
+    Recipes are separated by blank lines. One that reads only the custom tables is checked
+    in full. One that also reads a built-in table is checked for the SecurityIncident dedup
+    and event names only: this gate has no schema for built-in columns.
+    """
+    with open(KQL_FILE) as handle:
+        text = handle.read()
+    problems = []
+    checked = skipped = 0
+    for block in re.split(r"\n\s*\n", text):
+        query = "\n".join(line for line in block.splitlines() if not line.strip().startswith("//")).strip()
+        if not query:
+            continue
+        label = next((l.strip("/ ").strip() for l in block.splitlines() if l.strip().startswith("//") and l.strip("/ -=")), query.splitlines()[0])
+        mixed = any(re.search(rf"\b{name}\b", query) for name in BUILTIN_TABLES)
+        if mixed:
+            skipped += 1
+            found = [p for p in query_problems(query, {}, events)]
+        else:
+            checked += 1
+            found = query_problems(query, schemas, events)
+        problems.extend(f"{label}: {problem}" for problem in found)
+    return problems, checked, skipped
+
+
 def main():
     schemas = custom_table_schemas()
+    events = emitted_event_types()
     if not schemas:
         print("no DCR stream declarations found - the gate cannot check anything")
         return 1
@@ -167,7 +262,7 @@ def main():
     failed = False
     for path in paths:
         name = os.path.basename(path)
-        problems = check_rule(path, schemas)
+        problems = check_rule(path, schemas, events)
         if problems:
             failed = True
             print(f"{name}:")
@@ -175,6 +270,15 @@ def main():
                 print(f"  {problem}")
         else:
             print(f"{name}: ok")
+    kql_problems, kql_checked, kql_skipped = check_kql_file(schemas, events)
+    if kql_problems:
+        failed = True
+        print("socradar-kql-queries.kql:")
+        for problem in kql_problems:
+            print(f"  {problem}")
+    else:
+        print(f"socradar-kql-queries.kql: ok ({kql_checked} recipe(s) column-checked, "
+              f"{kql_skipped} read a built-in table and were checked for dedup and event names only)")
     if failed:
         return 1
     print(f"{len(paths)} rule(s) and hunting query/queries checked against {len(schemas)} custom table schema(s).")

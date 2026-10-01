@@ -30,35 +30,41 @@ SOCRadar_MSSP_Alarms_CL
 // -----------------------------------------
 
 // Match SOCRadar alarms with Microsoft Sentinel incidents
+// (incident titles are "[MSSP-<CompanyName>] #<alarm_id> - ...")
+let Incidents = SecurityIncident
+    | where TimeGenerated > ago(7d)
+    | summarize arg_max(TimeGenerated, *) by IncidentNumber
+    | where Title startswith "[MSSP-"
+    | project IncidentNumber, IncidentStatus = Status, IncidentCreated = CreatedTime,
+        AlarmId = extract(@"#(\d+)", 1, Title),
+        company_name = extract(@"^\[MSSP-([^\]]+)\]", 1, Title);
 SOCRadar_MSSP_Alarms_CL
 | where TimeGenerated > ago(7d)
-| join kind=leftouter (
-    SecurityIncident
-    | where TimeGenerated > ago(7d)
-    | where Title contains "[SOCRadar]"
-    | extend AlarmId = extract(@"#(\d+)", 1, Title)
-) on $left.AlarmId == $right.AlarmId
+| join kind=leftouter Incidents on AlarmId, company_name
 | project
+    company_name,
     AlarmId,
     AlarmTitle = Title,
     Severity,
     AlarmStatus = Status,
-    IncidentStatus = Status1,
-    IncidentNumber = IncidentNumber,
+    IncidentStatus,
+    IncidentNumber,
     AlarmDate,
-    IncidentCreated = CreatedTime
+    IncidentCreated
 
 // Find alarms without incidents (potential sync issues)
+let Incidents = SecurityIncident
+    | where TimeGenerated > ago(24h)
+    | summarize arg_max(TimeGenerated, *) by IncidentNumber
+    | where Title startswith "[MSSP-"
+    | project IncidentNumber, IncidentStatus = Status, IncidentCreated = CreatedTime,
+        AlarmId = extract(@"#(\d+)", 1, Title),
+        company_name = extract(@"^\[MSSP-([^\]]+)\]", 1, Title);
 SOCRadar_MSSP_Alarms_CL
 | where TimeGenerated > ago(24h)
 | where Status == "OPEN"
-| join kind=leftanti (
-    SecurityIncident
-    | where TimeGenerated > ago(24h)
-    | where Title contains "[SOCRadar]"
-    | extend AlarmId = extract(@"#(\d+)", 1, Title)
-) on AlarmId
-| project TimeGenerated, AlarmId, Title, Severity
+| join kind=leftanti Incidents on AlarmId, company_name
+| project TimeGenerated, company_name, AlarmId, Title, Severity
 
 // -----------------------------------------
 // 3. AUDIT & OPERATIONS
@@ -67,26 +73,27 @@ SOCRadar_MSSP_Alarms_CL
 // Import operations summary
 SOCRadar_MSSP_AuditLog_CL
 | where TimeGenerated > ago(24h)
-| where EventType == "AlarmImported"
+| where EventType in ("AlarmImported", "ImportError", "CompanyImportFailed")
 | summarize
-    TotalImported = count(),
-    Successful = countif(OperationStatus == "Success"),
-    Failed = countif(OperationStatus == "Failed")
+    Imported = countif(EventType == "AlarmImported"),
+    Failed = countif(EventType in ("ImportError", "CompanyImportFailed"))
+    by company_name
 
 // Sync operations summary
 SOCRadar_MSSP_AuditLog_CL
 | where TimeGenerated > ago(24h)
-| where EventType == "AlarmSynced"
+| where EventType in ("IncidentSynced", "SyncWriteRejected", "CompanySkippedUnmatched")
 | summarize
-    TotalSynced = count(),
-    Successful = countif(OperationStatus == "Success"),
-    Failed = countif(OperationStatus == "Failed")
+    Synced = countif(EventType == "IncidentSynced"),
+    Rejected = countif(EventType == "SyncWriteRejected"),
+    SkippedUnmatched = countif(EventType == "CompanySkippedUnmatched")
+    by company_name
 
 // Errors in last 24 hours
 SOCRadar_MSSP_AuditLog_CL
 | where TimeGenerated > ago(24h)
-| where OperationStatus == "Failed"
-| project TimeGenerated, EventType, AlarmId, Message
+| where EventType in ("ImportError", "CompanyImportFailed", "SyncWriteRejected", "CompanySkippedUnmatched")
+| project TimeGenerated, company_name, EventType, AlarmId, Message
 | order by TimeGenerated desc
 
 // -----------------------------------------
@@ -120,22 +127,26 @@ AzureDiagnostics
 // 5. SECURITY ANALYSIS
 // -----------------------------------------
 
-// High/Critical alarms not yet closed
+// High/Critical alarms not yet closed (days counted from import: AlarmDate is a string)
+let Incidents = SecurityIncident
+    | where TimeGenerated > ago(7d)
+    | summarize arg_max(TimeGenerated, *) by IncidentNumber
+    | where Title startswith "[MSSP-"
+    | project IncidentNumber, IncidentStatus = Status, IncidentCreated = CreatedTime,
+        AlarmId = extract(@"#(\d+)", 1, Title),
+        company_name = extract(@"^\[MSSP-([^\]]+)\]", 1, Title);
 SOCRadar_MSSP_Alarms_CL
 | where TimeGenerated > ago(7d)
 | where Severity in ("HIGH", "CRITICAL")
-| join kind=leftouter (
-    SecurityIncident
-    | where Status != "Closed"
-    | extend AlarmId = extract(@"#(\d+)", 1, Title)
-) on AlarmId
-| where Status1 != "Closed" or isnull(Status1)
+| join kind=leftouter Incidents on AlarmId, company_name
+| where IncidentStatus != "Closed" or isempty(IncidentStatus)
 | project
+    company_name,
     AlarmId,
     Severity,
     Title,
     AlarmDate,
-    DaysOpen = datetime_diff('day', now(), AlarmDate)
+    DaysOpen = datetime_diff('day', now(), TimeGenerated)
 | order by Severity, DaysOpen desc
 
 // Alarm trends by type (week over week)
@@ -150,14 +161,16 @@ SOCRadar_MSSP_Alarms_CL
 
 // Mean time to close (incidents)
 SecurityIncident
-| where Title contains "[SOCRadar]"
+| summarize arg_max(TimeGenerated, *) by IncidentNumber
+| where Title startswith "[MSSP-"
 | where Status == "Closed"
+| extend company_name = extract(@"^\[MSSP-([^\]]+)\]", 1, Title)
 | extend MTTC = datetime_diff('hour', ClosedTime, CreatedTime)
 | summarize
     AvgHoursToClose = avg(MTTC),
     MedianHoursToClose = percentile(MTTC, 50),
     IncidentCount = count()
-    by Classification
+    by company_name, Classification
 
 // -----------------------------------------
 // 6. WORKBOOK QUERIES
@@ -206,7 +219,7 @@ SOCRadar_MSSP_Alarms_CL
 // Schedule: Every 1 hour, lookback 1 hour
 SOCRadar_MSSP_AuditLog_CL
 | where TimeGenerated > ago(1h)
-| where OperationStatus == "Failed"
+| where EventType in ("ImportError", "CompanyImportFailed", "SyncWriteRejected")
 | summarize FailureCount = count()
 | where FailureCount > 0
 
@@ -231,5 +244,8 @@ SOCRadar_MSSP_Alarms_CL
 // Per-company audit health - successful runs vs failures last 24h
 SOCRadar_MSSP_AuditLog_CL
 | where TimeGenerated > ago(24h)
-| summarize SuccessCount = countif(Severity == "INFO"), ErrorCount = countif(Severity == "ERROR") by company_name
+| summarize
+    SuccessCount = countif(EventType in ("AlarmImported", "IncidentSynced")),
+    ErrorCount = countif(EventType in ("ImportError", "CompanyImportFailed", "SyncWriteRejected"))
+    by company_name
 | order by ErrorCount desc, company_name asc

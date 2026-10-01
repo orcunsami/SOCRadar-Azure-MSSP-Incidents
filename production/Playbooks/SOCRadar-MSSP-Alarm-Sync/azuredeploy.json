@@ -2,13 +2,13 @@
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "metadata": {
-    "title": "SOCRadar-Alarm-Sync",
-    "description": "Syncs closed incidents from Microsoft Sentinel back to SOCRadar platform. Uses Synced tag to prevent duplicate syncs. Filters by: SOCRadar tag + Closed status + lastModified. Now with pagination for 1000+ incidents.",
+    "title": "SOCRadar-MSSP-Alarm-Sync",
+    "description": "Syncs closed MSSP incidents from Microsoft Sentinel back to the matching SOCRadar company. Uses the Synced label to prevent duplicate syncs. Filters by: SOCRadar label + Closed status + lastModified + the [MSSP- title prefix. Pages through 1000+ incidents.",
     "version": "1.0.0",
     "author": {
       "name": "SOCRadar"
     },
-    "lastUpdateTime": "2026-08-21T00:00:00.000Z",
+    "lastUpdateTime": "2026-10-01T00:00:00.000Z",
     "support": {
       "tier": "Partner"
     }
@@ -83,7 +83,7 @@
     "CompanyNames": {
       "type": "string",
       "metadata": {
-        "description": "Comma-separated company names matching CompanyIds positionally. Used to parse incidents (Company:<name> tag) back to company_id for the Sync API call."
+        "description": "Comma-separated company names matching CompanyIds positionally. Used to parse the [MSSP-<name>] title prefix of an incident back to company_id for the Sync API call."
       }
     },
     "location": {
@@ -465,59 +465,6 @@
                       },
                       "runAfter": {}
                     },
-                    "Check_Sync_Audit": {
-                      "type": "If",
-                      "expression": {
-                        "and": [
-                          {
-                            "equals": [
-                              "@parameters('EnableAuditLogging')",
-                              true
-                            ]
-                          }
-                        ]
-                      },
-                      "actions": {
-                        "Log_Sync_Event": {
-                          "type": "Http",
-                          "inputs": {
-                            "method": "POST",
-                            "uri": "@{concat(parameters('AuditDcrEndpoint'), '/dataCollectionRules/', parameters('AuditDcrImmutableId'), '/streams/', parameters('AuditStreamName'), '?api-version=2023-01-01')}",
-                            "headers": {
-                              "Content-Type": "application/json"
-                            },
-                            "authentication": {
-                              "type": "ManagedServiceIdentity",
-                              "audience": "https://monitor.azure.com"
-                            },
-                            "body": [
-                              {
-                                "TimeGenerated": "@{utcNow()}",
-                                "EventType": "IncidentSynced",
-                                "AlarmId": "@{outputs('Extract_Alarm_ID')}",
-                                "IncidentId": "@{items('For_Each_Incident')?['properties']?['incidentNumber']}",
-                                "CompanyId": "@{first(body('Filter_Company_Config'))?['CompanyId']}",
-                                "AlarmType": "",
-                                "Status": "@{coalesce(items('For_Each_Incident')?['properties']?['classification'], 'Unclassified')}",
-                                "Severity": "@{coalesce(items('For_Each_Incident')?['properties']?['severity'], 'Medium')}",
-                                "Message": "@{concat('Incident synced: classification=', coalesce(items('For_Each_Incident')?['properties']?['classification'], 'Unknown'))}",
-                                "FullAlarmJson": "",
-                                "company_name": "@{first(body('Filter_Company_Config'))?['CompanyName']}"
-                              }
-                            ]
-                          },
-                          "runAfter": {}
-                        }
-                      },
-                      "else": {
-                        "actions": {}
-                      },
-                      "runAfter": {
-                        "Check_SOCRadar_Write_Succeeded": [
-                          "Succeeded"
-                        ]
-                      }
-                    },
                     "Check_SOCRadar_Write_Succeeded": {
                       "type": "If",
                       "expression": {
@@ -572,10 +519,111 @@
                             }
                           },
                           "runAfter": {}
+                        },
+                        "Check_Sync_Audit": {
+                          "type": "If",
+                          "expression": {
+                            "and": [
+                              {
+                                "equals": [
+                                  "@parameters('EnableAuditLogging')",
+                                  true
+                                ]
+                              }
+                            ]
+                          },
+                          "actions": {
+                            "Log_Sync_Event": {
+                              "type": "Http",
+                              "inputs": {
+                                "method": "POST",
+                                "uri": "@{concat(parameters('AuditDcrEndpoint'), '/dataCollectionRules/', parameters('AuditDcrImmutableId'), '/streams/', parameters('AuditStreamName'), '?api-version=2023-01-01')}",
+                                "headers": {
+                                  "Content-Type": "application/json"
+                                },
+                                "authentication": {
+                                  "type": "ManagedServiceIdentity",
+                                  "audience": "https://monitor.azure.com"
+                                },
+                                "body": [
+                                  {
+                                    "TimeGenerated": "@{utcNow()}",
+                                    "EventType": "IncidentSynced",
+                                    "AlarmId": "@{outputs('Extract_Alarm_ID')}",
+                                    "IncidentId": "@{items('For_Each_Incident')?['properties']?['incidentNumber']}",
+                                    "AlarmType": "",
+                                    "Status": "@{coalesce(items('For_Each_Incident')?['properties']?['classification'], 'Unclassified')}",
+                                    "Severity": "@{coalesce(items('For_Each_Incident')?['properties']?['severity'], 'Medium')}",
+                                    "Message": "@{concat('Incident synced: classification=', coalesce(items('For_Each_Incident')?['properties']?['classification'], 'Unknown'))}",
+                                    "FullAlarmJson": "",
+                                    "company_name": "@{first(body('Filter_Company_Config'))?['CompanyName']}"
+                                  }
+                                ]
+                              },
+                              "runAfter": {}
+                            }
+                          },
+                          "else": {
+                            "actions": {}
+                          },
+                          "runAfter": {
+                            "Add_Synced_Tag": [
+                              "Succeeded"
+                            ]
+                          }
                         }
                       },
                       "else": {
-                        "actions": {}
+                        "actions": {
+                          "Check_Sync_Rejected_Audit": {
+                            "type": "If",
+                            "expression": {
+                              "and": [
+                                {
+                                  "equals": [
+                                    "@parameters('EnableAuditLogging')",
+                                    true
+                                  ]
+                                }
+                              ]
+                            },
+                            "actions": {
+                              "Log_Sync_Rejected": {
+                                "type": "Http",
+                                "inputs": {
+                                  "method": "POST",
+                                  "uri": "@{concat(parameters('AuditDcrEndpoint'), '/dataCollectionRules/', parameters('AuditDcrImmutableId'), '/streams/', parameters('AuditStreamName'), '?api-version=2023-01-01')}",
+                                  "headers": {
+                                    "Content-Type": "application/json"
+                                  },
+                                  "authentication": {
+                                    "type": "ManagedServiceIdentity",
+                                    "audience": "https://monitor.azure.com"
+                                  },
+                                  "body": [
+                                    {
+                                      "TimeGenerated": "@{utcNow()}",
+                                      "EventType": "SyncWriteRejected",
+                                      "AlarmId": "@{outputs('Extract_Alarm_ID')}",
+                                      "IncidentId": "@{items('For_Each_Incident')?['properties']?['incidentNumber']}",
+                                      "AlarmType": "",
+                                      "Status": "@{coalesce(items('For_Each_Incident')?['properties']?['classification'], 'Unclassified')}",
+                                      "Severity": "High",
+                                      "Message": "@{concat('SOCRadar did not accept the status change for alarm ', outputs('Extract_Alarm_ID'), ': ', take(string(coalesce(body('Update_SOCRadar_Status')?['message'], 'no message returned')), 300))}",
+                                      "FullAlarmJson": "",
+                                      "company_name": "@{first(body('Filter_Company_Config'))?['CompanyName']}"
+                                    }
+                                  ]
+                                },
+                                "runAfter": {}
+                              }
+                            },
+                            "else": {
+                              "actions": {}
+                            },
+                            "runAfter": {}
+                          }
+                        }
                       },
                       "runAfter": {
                         "Update_SOCRadar_Status": [
@@ -703,7 +751,6 @@
                             "EventType": "CompanySkippedUnmatched",
                             "AlarmId": "@{outputs('Extract_Alarm_ID')}",
                             "IncidentId": "@{items('For_Each_Incident')?['properties']?['incidentNumber']}",
-                            "CompanyId": "",
                             "AlarmType": "",
                             "Status": "@{coalesce(items('For_Each_Incident')?['properties']?['classification'], 'Unclassified')}",
                             "Severity": "@{coalesce(items('For_Each_Incident')?['properties']?['severity'], 'Medium')}",

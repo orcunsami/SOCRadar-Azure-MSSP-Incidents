@@ -12,7 +12,7 @@
 |------|-------------|---------|
 | 3 test SOCRadar Company IDs (e.g. 132, 200, 300) | SOCRadar account team | Customer |
 | Human-readable names for each company (e.g. Acme, Beta, Gamma) | Customer or SOCRadar | Deploy parameter |
-| **MSSP-scoped `SocradarApiKey`** - one key that grants `/api/company/{id}/incidents/v4` access for ALL listed companies | SOCRadar account team | Deploy parameter |
+| **MSSP-scoped `SOCRadarAPIKey`** - one key that grants `/api/company/{id}/incidents/v4` access for ALL listed companies | SOCRadar account team | Deploy parameter |
 | Microsoft Sentinel workspace name + resource group | Customer | Deploy parameter |
 
 **MSSP-scoped API key**: this is a single SOCRadar API key configured by the account team to authorize multiple `CompanyId` paths. The customer does **not** rotate keys per company. If the customer has separate per-company keys instead, contact SOCRadar account team before this test - the integration assumes one key.
@@ -52,6 +52,7 @@ Confirm to customer: "9 alarms seeded across companies 132, 200, 300. Ready for 
    - **Resource Group**: a new or existing RG for the integration
    - **Region** / **Workspace Location**: e.g. `westeurope` - must match your Microsoft Sentinel workspace's region
    - **Workspace Name**: your existing Microsoft Sentinel workspace name
+   - **Deploy New Workspace**: set `false` for an existing workspace; the default `true` creates a second, empty workspace if the name has a typo
    - **Workspace Resource Group**: (optional) leave blank if same RG; set if workspace lives in another RG
    - **SOCRadar API Key**: the MSSP-scoped API key from the SOCRadar account team
    - **Company Ids**: `132,200,300`
@@ -131,7 +132,7 @@ Open the workbook. **Alarms by Company** should render a bar per company (3 alar
 Mapping reference:
 | Microsoft Sentinel Classification | SOCRadar status |
 |------------------------|-----------------|
-| TruePositive | Resolved |
+| TruePositive / Undetermined | Resolved |
 | FalsePositive | False Positive |
 | BenignPositive | Mitigated |
 
@@ -141,7 +142,6 @@ Mapping reference:
 
 **Customer side:**
 1. Delete the deployment resource group (this removes all integration resources).
-2. (If standalone deployed) Delete the resource group.
 
 **SOCRadar side:**
 1. Mark the 9 dummy alarms `RESOLVED` (or delete) on test environment across companies 132, 200, 300 so they don't bleed into the next test.
