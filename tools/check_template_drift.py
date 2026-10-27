@@ -524,6 +524,13 @@ def check_workspace_guard(failures):
     resources = template["resources"]
     by_name = {r.get("name"): r for r in resources}
 
+    # The default is false: the template does not update a workspace that already exists, so a
+    # commitment tier can never be touched and a missing name fails before anything is created.
+    # Creating a workspace is opt-in.
+    toggle = template.get("parameters", {}).get("DeployNewWorkspace", {})
+    if toggle.get("defaultValue") is not False:
+        failures.append("azuredeploy.json: DeployNewWorkspace must default to false")
+
     for name, condition in ((GUARD, "[not(variables('deployWorkspace'))]"),
                             (EXTERNAL, "[variables('isExternalWorkspace')]")):
         resource = by_name.get(name)

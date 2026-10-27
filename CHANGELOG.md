@@ -15,6 +15,13 @@ The only tag in this repository is `v1.0.0` (annotated, 15 May 2026, commit
 21 Aug 2026 but was never tagged, and two commits landed after it without a
 changelog entry -- they are recorded here.
 
+### Changed
+
+- **`DeployNewWorkspace` now defaults to `false`.** A deployment leaves an existing workspace
+  alone and a name that does not exist fails before anything is created. Creating a workspace
+  is opt-in (`true`). Existing installs are unaffected; only a new deployment that relied on the
+  old default needs `DeployNewWorkspace=true`.
+
 ### Fixed
 
 - **A refused status change no longer logs as synced.** SOCRadar answers HTTP 200 with
@@ -72,7 +79,7 @@ changelog entry -- they are recorded here.
   so the default silently targeted whatever that id points at today. It now uses
   `TEST_SUBSCRIPTION` or the logged-in context and refuses to run without one.
 - **A redeploy cannot rewrite an existing workspace.** `DeployNewWorkspace`
-  (default `true` now, `false` in those commits) and a Workspace resource that declares no properties, from the
+  (default `true` when this entry was written, `false` since the flip above) and a Workspace resource that declares no properties, from the
   27 Aug commits. (EXP-AZURE-0160)
 
 ### Added

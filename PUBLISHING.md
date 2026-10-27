@@ -130,7 +130,7 @@ Customers go to your repository and click **Deploy to Azure**. The Azure Portal 
 
 | Customer profile | Deploy parameters |
 |------------------|--------------------|
-| MSSP monitoring N customer companies from one Microsoft Sentinel workspace | `CompanyIds=132,200,300`, `CompanyNames=Acme,Beta,Gamma`, MSSP-scoped `SOCRadarAPIKey`, existing `WorkspaceName` with `DeployNewWorkspace=false` |
+| MSSP monitoring N customer companies from one Microsoft Sentinel workspace | `CompanyIds=132,200,300`, `CompanyNames=Acme,Beta,Gamma`, MSSP-scoped `SOCRadarAPIKey`, existing `WorkspaceName` (`DeployNewWorkspace` stays at its default `false`) |
 | Holding company with multiple legal entities | Same - list each entity's SOCRadar Company ID + a human-readable name |
 | Single-company customer | **Use the single-customer `SOCRadar` solution instead.** This MSSP edition is over-engineered for the single-company case. |
 

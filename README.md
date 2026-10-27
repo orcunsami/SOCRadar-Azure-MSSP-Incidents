@@ -10,7 +10,7 @@ For **single-customer** deployments, use the [`SOCRadar-Azure-Incidents`](https:
 
 1. Click **Deploy to Azure** above.
 2. Fill the form:
-   - `WorkspaceName` - your existing Microsoft Sentinel workspace. `DeployNewWorkspace` defaults to `true` and creates a workspace when the name is not found, so a typo makes a second, empty one; set it to `false` for an existing workspace
+   - `WorkspaceName` - your existing Microsoft Sentinel workspace. `DeployNewWorkspace` defaults to `false`: the deployment uses that workspace and does not update it, so its pricing tier (commitment tier included), retention and daily cap stay as they are, and a wrong name fails before anything is created. Set it to `true` only when you have no workspace and want one created
    - `CompanyIds` - comma-separated SOCRadar Company IDs (e.g. `132,200,300`)
    - `CompanyNames` - same length CSV with human-readable names (e.g. `Acme,Beta,Gamma`)
    - `SOCRadarAPIKey` - **MSSP-scoped** SOCRadar API key (one key for all Company IDs; SOCRadar's account team configures this)

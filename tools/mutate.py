@@ -30,6 +30,10 @@ KQL_FILE = "production/socradar-kql-queries.kql"
 
 # (label, file, find, replace)
 MUTATIONS = [
+    ("workspace toggle defaults to true again",
+     TEMPLATE, '"DeployNewWorkspace": {\n      "type": "bool",\n      "defaultValue": false,',
+     '"DeployNewWorkspace": {\n      "type": "bool",\n      "defaultValue": true,'),
+
     ("the guard is gone",
      TEMPLATE, '"name": "precheck-workspace-exists",', '"name": "precheck-workspace-exists-renamed",'),
 

@@ -10,14 +10,15 @@
 #
 # It shipped that way because every earlier test ran DeployNewWorkspace=true --
 # a fresh workspace is what a greenfield test needs -- so the path a customer
-# actually clicks, the defaults, was never run.
+# actually clicks, the defaults, was never run. The default is now false, so every
+# path except B and F runs at the defaults and B and F opt in to creating a workspace.
 #
 # Seven paths, each asserting a different thing:
-#   A  missing workspace, DeployNewWorkspace=false -> fails, resource group stays EMPTY
-#   B  same RG, defaults (one click)          -> succeeds, guard SKIPPED
-#   C1 existing workspace, same RG           -> guard SUCCEEDS and resolves customerId
+#   A  missing workspace, defaults (DeployNewWorkspace=false) -> fails, resource group stays EMPTY
+#   B  same RG, DeployNewWorkspace=true (opt-in create) -> succeeds, guard SKIPPED
+#   C1 existing workspace, defaults, same RG -> guard SUCCEEDS and resolves customerId
 #   C2 cross-RG onto a separately onboarded workspace -> assert SUCCEEDS, no endpoint
-#   D  redeploy against the workspace B made  -> the guard does not block it
+#   D  redeploy against the workspace B made, defaults -> the guard does not block it
 #   E  cross-RG onto a workspace with no Microsoft Sentinel -> rejected, nothing created
 #   F  audit logging with the alarms table off -> succeeds, endpoint still created
 #
@@ -110,8 +111,8 @@ az group create -n "$RG_APP" -l "$LOCATION" -o none
 az group create -n "$RG_WS"  -l "$LOCATION" -o none
 
 # --- A: the customer's typo, defaults left alone --------------------------------
-echo "[2/5] Path A: missing workspace with DeployNewWorkspace=false ..."
-deploy "$RG_APP" path-a WorkspaceName="$MISSING" WorkspaceResourceGroup="$RG_APP" DeployNewWorkspace=false
+echo "[2/5] Path A: missing workspace, DeployNewWorkspace at its default (false) ..."
+deploy "$RG_APP" path-a WorkspaceName="$MISSING" WorkspaceResourceGroup="$RG_APP"
 state=$(az deployment group show -g "$RG_APP" -n path-a --query properties.provisioningState -o tsv 2>/dev/null)
 left=$(az resource list -g "$RG_APP" --query "length(@)" -o tsv 2>/dev/null)
 failed_steps=$(az deployment operation group list -g "$RG_APP" -n path-a \
@@ -130,8 +131,8 @@ failed_steps=$(az deployment operation group list -g "$RG_APP" -n path-a \
     || row "A blames the precheck" FAIL "the precheck was not the failing step"
 
 # --- B: greenfield, the only mode earlier tests used ----------------------------
-echo "[3/5] Path B: new workspace name, parameters at their defaults ..."
-deploy "$RG_APP" path-b WorkspaceName="$WS" WorkspaceResourceGroup="$RG_APP"
+echo "[3/5] Path B: new workspace name, DeployNewWorkspace=true ..."
+deploy "$RG_APP" path-b WorkspaceName="$WS" WorkspaceResourceGroup="$RG_APP" DeployNewWorkspace=true
 state=$(az deployment group show -g "$RG_APP" -n path-b --query properties.provisioningState -o tsv 2>/dev/null)
 [ "$state" = Succeeded ] \
     && row "B greenfield succeeds" PASS "$state" \
@@ -152,7 +153,7 @@ apps=$(az resource list -g "$RG_APP" --resource-type "Microsoft.Logic/workflows"
 # assert is skipped and the template onboards Microsoft Sentinel itself.
 echo "[4/5] Path C1: existing workspace, same resource group, guard active ..."
 az monitor log-analytics workspace create -g "$RG_WS" -n "$WS" -l "$LOCATION" --retention-time 30 -o none 2>/dev/null
-deploy "$RG_WS" path-c1 WorkspaceName="$WS" WorkspaceResourceGroup="$RG_WS" DeployNewWorkspace=false
+deploy "$RG_WS" path-c1 WorkspaceName="$WS" WorkspaceResourceGroup="$RG_WS"
 guard_state=$(az deployment operation group list -g "$RG_WS" -n path-c1 \
     --query "[?properties.targetResource.resourceName=='precheck-workspace-exists'].properties.provisioningState" -o tsv 2>/dev/null)
 [ "$guard_state" = Succeeded ] \
@@ -189,7 +190,7 @@ onboarded=$(az rest --method GET \
     || row "C2 fixture: workspace onboarded" FAIL "the PUT did not take, C2 below tests nothing"
 
 az group create -n "$RG_X" -l "$LOCATION" -o none
-deploy "$RG_X" path-c2 WorkspaceName="$WS_ONB" WorkspaceResourceGroup="$RG_ONB" DeployNewWorkspace=false
+deploy "$RG_X" path-c2 WorkspaceName="$WS_ONB" WorkspaceResourceGroup="$RG_ONB"
 state=$(az deployment group show -g "$RG_X" -n path-c2 --query properties.provisioningState -o tsv 2>/dev/null)
 [ "$state" = Succeeded ] \
     && row "C2 cross-RG succeeds" PASS "$state" \
@@ -213,7 +214,7 @@ tables=$(az resource list -g "$RG_X" --resource-type "Microsoft.Insights/dataCol
 
 # --- D: the guard must not block a second, correct deployment -------------------
 echo "[5/5] Path D: redeploying B's resource group with the guard active ..."
-deploy "$RG_APP" path-d WorkspaceName="$WS" WorkspaceResourceGroup="$RG_APP" DeployNewWorkspace=false
+deploy "$RG_APP" path-d WorkspaceName="$WS" WorkspaceResourceGroup="$RG_APP"
 state=$(az deployment group show -g "$RG_APP" -n path-d --query properties.provisioningState -o tsv 2>/dev/null)
 [ "$state" = Succeeded ] \
     && row "D redeploy succeeds" PASS "$state" \
@@ -224,7 +225,7 @@ echo "[5/5] Path E: cross-RG onto a workspace with no Microsoft Sentinel ..."
 az group create -n "$RG_BARE" -l "$LOCATION" -o none
 az monitor log-analytics workspace create -g "$RG_BARE" -n "$WS_BARE" -l "$LOCATION" --retention-time 30 -o none 2>/dev/null
 az group create -n "$RG_E" -l "$LOCATION" -o none
-deploy "$RG_E" path-e WorkspaceName="$WS_BARE" WorkspaceResourceGroup="$RG_BARE" DeployNewWorkspace=false
+deploy "$RG_E" path-e WorkspaceName="$WS_BARE" WorkspaceResourceGroup="$RG_BARE"
 state=$(az deployment group show -g "$RG_E" -n path-e --query properties.provisioningState -o tsv 2>/dev/null)
 left=$(az resource list -g "$RG_E" --query "length(@)" -o tsv 2>/dev/null)
 [ "$state" = Failed ] \

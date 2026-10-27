@@ -47,7 +47,7 @@ wrapper = {
         "WorkspaceName": {"type": "string"},
         "WorkspaceLocation": {"type": "string", "defaultValue": "[resourceGroup().location]"},
         "WorkspaceResourceGroup": {"type": "string", "defaultValue": "[resourceGroup().name]"},
-        "DeployNewWorkspace": {"type": "bool", "defaultValue": True},
+        "DeployNewWorkspace": {"type": "bool", "defaultValue": False},
     },
     "variables": {
         "isExternalWorkspace": d["variables"]["isExternalWorkspace"],
@@ -88,7 +88,7 @@ BEFORE=$(az monitor log-analytics workspace show -g "$RG" -n "$WS" --subscriptio
     --query "{sku:sku.name, retention:retentionInDays, lastSkuUpdate:sku.lastSkuUpdate}" -o json)
 echo "  before: $BEFORE"
 
-echo "[4/6] Deploying with DeployNewWorkspace=true -- the real customer mistake (pointing at an existing, same-RG workspace without flipping the toggle) ..."
+echo "[4/6] Deploying with DeployNewWorkspace=true -- the worst case (the toggle switched on against an existing, same-RG workspace) ..."
 az deployment group create --subscription "$SUBSCRIPTION" -g "$RG" \
     --template-file "$WRAPPER" \
     --parameters WorkspaceName="$WS" DeployNewWorkspace=true \
